@@ -142,6 +142,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val s_execute        = RegInit(true.B) // D  w_pprobeack, w_grant
   val w_grantack       = RegInit(true.B)
   val s_writeback      = RegInit(true.B) // W  w_*
+  val flush_wait       = RegInit(0.U(3.W))
 
   // [1]: We cannot issue outer Acquire while holding blockB (=> outA can stall)
   // However, inB and outC are higher priority than outB, so s_release and s_pprobe
@@ -198,7 +199,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.c.valid := (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant
   io.schedule.bits.e.valid := !s_grantack && w_grantfirst
-  io.schedule.bits.x.valid := !s_flush && w_releaseack
+  //io.schedule.bits.x.valid := !s_flush && w_releaseack
+  io.schedule.bits.x.valid := Bool(false)
   io.schedule.bits.dir.valid := (!s_release && w_rprobeackfirst) || (!s_writeback && no_wait)
   io.schedule.bits.reload := no_wait
   io.schedule.valid := ( io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
@@ -225,6 +227,16 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       request_valid := false.B
       meta_valid := false.B
     }
+  }
+
+  when (flush_wait > 2.U && no_wait) {
+    s_flush := Bool(true)
+    s_writeback  := Bool(true)
+    request_valid := Bool(false)
+    meta_valid := Bool(false)
+    flush_wait := 0.U
+  } .elsewhen (!s_flush && w_releaseack) {
+    flush_wait := flush_wait + 1.U
   }
 
   // Resulting meta-data
@@ -611,10 +623,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         s_release := false.B
         w_releaseack := false.B
         // Do we need to shoot-down inner caches?
-        when ((!params.firstLevel).B && (new_meta.clients =/= 0.U)) {
-          s_rprobe := false.B
-          w_rprobeackfirst := false.B
-          w_rprobeacklast := false.B
+        when (Bool(!params.firstLevel) && (new_meta.clients =/= UInt(0))) {
+          //s_rprobe := Bool(false)
+          w_rprobeackfirst := Bool(false)
+          w_rprobeacklast := Bool(false)
         }
       }
     }
