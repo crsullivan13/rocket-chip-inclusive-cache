@@ -46,14 +46,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val resp = Valid(new SinkCResponse(params)) // ProbeAck
     val c = Flipped(Decoupled(new TLBundleC(params.inner.bundle)))
     // Find 'way' via MSHR CAM lookup
-<<<<<<< HEAD
     val set = UInt(params.setBits.W)
     val way = Flipped(UInt(params.wayBits.W))
-=======
-    val set = UInt(width = params.setBits)
-    val way = UInt(width = params.wayBits).flip
-    val way_valid = Bool().flip
->>>>>>> 73d1bc2 (Add L2 flush)
+    val way_valid = Flipped(Bool())
     // ProbeAck write-back
     val bs_adr = Decoupled(new BankedStoreInnerAddress(params))
     val bs_dat = new BankedStoreInnerPoison(params)
@@ -86,9 +81,10 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val (first, last, _, beat) = params.inner.count(c)
     val hasData = params.inner.hasData(c.bits)
     val raw_resp = c.bits.opcode === TLMessages.ProbeAck || c.bits.opcode === TLMessages.ProbeAckData
-    val raw_isFlush = c.bits.opcode === TLMessages.ProbeAckData && c.bits.param === TLPermissions.FLUSH
+    val raw_isFlush = raw_resp && c.bits.param === TLPermissions.FLUSH
     val resp = Mux(c.valid, raw_resp, RegEnable(raw_resp, c.valid))
     val isFlush = Mux(c.valid, raw_isFlush, RegEnable(raw_isFlush, c.valid))
+    val flushed = RegInit(Bool(false))
 
     // Handling of C is broken into two cases:
     //   ProbeAck
@@ -108,7 +104,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val bs_adr = Wire(chiselTypeOf(io.bs_adr))
     io.bs_adr <> Queue(bs_adr, 1, pipe=true)
     io.bs_dat.data   := RegEnable(c.bits.data,    bs_adr.fire())
-    bs_adr.valid     := io.way_valid && (isFlush || resp) && (!first || (c.valid && hasData))
+    bs_adr.valid     := io.way_valid && resp && (!first || (c.valid && hasData))
     //bs_adr.valid     := (isFlush || resp) && (!first || (c.valid && hasData))
     bs_adr.bits.noop := !c.valid
     bs_adr.bits.way  := io.way
@@ -146,7 +142,6 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     params.ccover(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
     params.ccover(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
 
-<<<<<<< HEAD
     io.perfStall.didEventOccur := false.B
     io.perfStall.domainId := 4.U
     when ( c.valid && !raw_resp && ( req_block || buf_block || set_block ) ) {
@@ -154,25 +149,17 @@ class SinkC(params: InclusiveCacheParameters) extends Module
       io.perfStall.domainId := c.bits.domainId
     }
 
-    c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
-=======
     c.ready := Mux(raw_resp, !hasData || bs_adr.ready && io.way_valid, !req_block && !buf_block && !set_block)
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
->>>>>>> 73d1bc2 (Add L2 flush)
 
-    io.req.valid := (!resp || isFlush) && c.valid && first && !buf_block && !set_block
+    io.req.valid := (!resp || isFlush && !flushed) && c.valid && first && !buf_block && !set_block
     putbuffer.io.push.valid := !resp && c.valid && hasData && !req_block && !set_block
     when (!resp && c.valid && first && hasData && !req_block && !buf_block) { lists_set := freeOH }
 
     val put = Mux(first, freeIdx, RegEnable(freeIdx, first))
 
-<<<<<<< HEAD
-    io.req.bits.prio   := VecInit(4.U(3.W).asBools)
-    io.req.bits.control:= false.B
-=======
-    io.req.bits.prio   := Mux(isFlush, Vec(UInt(1, width=3).asBools), Vec(UInt(4, width=3).asBools))
+    io.req.bits.prio   := Mux(isFlush, VecInit(1.U(3.W).asBools), VecInit(4.U(3.W).asBools))
     io.req.bits.control:= isFlush
->>>>>>> 73d1bc2 (Add L2 flush)
     io.req.bits.opcode := c.bits.opcode
     io.req.bits.param  := c.bits.param
     io.req.bits.size   := c.bits.size
@@ -186,6 +173,12 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     putbuffer.io.push.bits.index := put
     putbuffer.io.push.bits.data.data    := c.bits.data
     putbuffer.io.push.bits.data.corrupt := c.bits.corrupt
+
+    when (io.req.fire() && isFlush) {
+      flushed := Bool(true)
+    } .elsewhen (last) {
+      flushed := Bool(false)
+    }
 
     // Grant access to pop the data
     putbuffer.io.pop.bits := io.rel_pop.bits.index
