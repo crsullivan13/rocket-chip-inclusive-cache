@@ -382,7 +382,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       bc_mshr.io.status.bits.way,
       Mux1H(abc_mshrs.map(m => m.io.status.valid && m.io.status.bits.set === sinkC.io.set),
             abc_mshrs.map(_.io.status.bits.way)))
-  sinkC.io.way_valid := RegNext(abc_mshrs.map(m => m.io.status.valid && m.io.status.bits.set === sinkC.io.set).reduce(_||_))
+  sinkC.io.way_valid := RegNext(bc_mshr.io.status.valid && bc_mshr.io.status.bits.set === sinkC.io.set ||
+    abc_mshrs.map(m => m.io.status.valid && m.io.status.bits.set === sinkC.io.set).reduce(_||_))
   sinkD.io.way := Vec(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := Vec(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 

@@ -110,7 +110,7 @@ class InclusiveCache(
   val node: TLAdapterNode = TLAdapterNode(
     clientFn  = { _ => TLClientPortParameters(Seq(TLClientParameters(
       name          = s"L${cache.level} InclusiveCache",
-      sourceId      = IdRange(0, InclusiveCacheParameters.out_mshrs(cache, micro)),
+      sourceId      = IdRange(0, InclusiveCacheParameters.all_mshrs(cache, micro)),
       supportsProbe = xfer)))
     },
     managerFn = { m => TLManagerPortParameters(
