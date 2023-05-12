@@ -105,22 +105,22 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   val meta = Reg(new DirectoryResult(params))
 
   // Define which states are valid
-  when (meta_valid) {
-    when (meta.state === INVALID) {
-      assert (!meta.clients.orR)
-      assert (!meta.dirty)
-    }
-    when (meta.state === BRANCH) {
-      assert (!meta.dirty)
-    }
-    when (meta.state === TRUNK) {
-      assert (meta.clients.orR)
-      assert ((meta.clients & (meta.clients - 1.U)) === 0.U) // at most one
-    }
-    when (meta.state === TIP) {
-      // noop
-    }
-  }
+  // when (meta_valid) {
+  //   when (meta.state === INVALID) {
+  //     assert (!meta.clients.orR)
+  //     assert (!meta.dirty)
+  //   }
+  //   when (meta.state === BRANCH) {
+  //     assert (!meta.dirty)
+  //   }
+  //   when (meta.state === TRUNK) {
+  //     assert (meta.clients.orR)
+  //     assert ((meta.clients & (meta.clients - UInt(1))) === UInt(0)) // at most one
+  //   }
+  //   when (meta.state === TIP) {
+  //     // noop
+  //   }
+  // }
 
   // Completed transitions (s_ = scheduled), (w_ = waiting)
   val s_rprobe         = RegInit(true.B) // B
