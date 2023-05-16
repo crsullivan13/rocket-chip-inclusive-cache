@@ -115,6 +115,10 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     bs_adr.bits.mask := ~0.U(params.innerMaskBits.W)
     params.ccover(bs_adr.valid && !bs_adr.ready, "SINKC_SRAM_STALL", "Data SRAM busy")
 
+    dontTouch(bs_adr)
+    dontTouch(first)
+    dontTouch(resp)
+
     //io.resp.valid := resp && !isFlush && c.valid && (first || last) && (!hasData || bs_adr.ready) //no dirty!
     io.resp.valid := resp && c.valid && (first || last) && (!hasData || bs_adr.ready)
     io.resp.bits.last   := last
@@ -181,7 +185,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
 
     when (io.req.fire() && isFlush) {
       flushed := Bool(true)
-    } .elsewhen (last) {
+    } 
+    
+    when (isFlush && last) {
       flushed := Bool(false)
     }
 
