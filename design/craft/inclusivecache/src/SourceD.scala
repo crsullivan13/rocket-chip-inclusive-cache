@@ -221,8 +221,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module
   io.d <> params.micro.innerBuf.d(d)
 
   d.valid := s3_valid_d
-  d.bits.opcode  := Mux(s3_req.prio(0), Mux(s3_req.control, SuperReleaseAck, resp_opcode(s3_req.opcode)), ReleaseAck)
-  d.bits.param   := Mux(s3_req.prio(0) && s3_acq, Mux(s3_req.param =/= NtoB, toT, toB), UInt(0))
+  d.bits.opcode  := Mux(s3_req.prio(0), Mux(s3_req.control, ReleaseAck, resp_opcode(s3_req.opcode)), ReleaseAck)
+  d.bits.param   := Mux(s3_req.prio(0) && s3_acq, Mux(s3_req.param =/= NtoB, toT, toB), Mux(s3_req.control, RootRelease, UInt(0)))
   d.bits.size    := s3_req.size
   d.bits.source  := s3_req.source
   d.bits.sink    := s3_req.sink
