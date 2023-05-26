@@ -144,9 +144,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val buf_block = hasData && !putbuffer.io.push.ready
     val set_block = hasData && first && !free
 
-    params.ccover(c.valid && !raw_resp && req_block, "SINKC_REQ_STALL", "No MSHR available to sink request")
-    params.ccover(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
-    params.ccover(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
+    params.ccover(c.valid && !(raw_resp && !isFlush) && req_block, "SINKC_REQ_STALL", "No MSHR available to sink request")
+    params.ccover(c.valid && !(raw_resp && !isFlush) && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
+    params.ccover(c.valid && !(raw_resp && !isFlush) && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
 
     io.perfStall.didEventOccur := false.B
     io.perfStall.domainId := 4.U
@@ -156,7 +156,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     }
 
     c.ready := Mux(raw_resp, Mux(!raw_isFlush, !hasData || bs_adr.ready,
-                   !hasData || bs_adr.ready && io.way_valid),
+                   (!hasData && !req_block) || (bs_adr.ready && io.way_valid)),
                    !req_block && !buf_block && !set_block)
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready && io.way_valid, !req_block && !buf_block && !set_block)
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
