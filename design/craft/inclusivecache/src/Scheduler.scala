@@ -389,6 +389,11 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   sinkD.io.way := Vec(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := Vec(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 
+  // wire MSHRs to sinkC bs_adr fire
+  for (i <- 0 until params.mshrs) {
+    mshrs(i).io.sinkc_bs_fire := mshrs(i).io.status.valid && mshrs(i).io.status.bits.set === sinkC.io.set && sinkC.io.bs_adr.fire
+  }
+
   // Beat buffer connections between components
   sinkA.io.pb_pop <> sourceD.io.pb_pop
   sourceD.io.pb_beat := sinkA.io.pb_beat

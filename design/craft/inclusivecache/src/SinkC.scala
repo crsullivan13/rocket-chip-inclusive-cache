@@ -82,9 +82,11 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val (first, last, _, beat) = params.inner.count(c)
     val hasData = params.inner.hasData(c.bits)
     val raw_resp = c.bits.opcode === TLMessages.ProbeAck || c.bits.opcode === TLMessages.ProbeAckData
-    val raw_isFlush = raw_resp && c.bits.param === TLPermissions.FLUSH
+    val raw_isFlush = raw_resp && (c.bits.param === TLPermissions.FLUSH || c.bits.param === TLPermissions.FLUSH_WB)
+    val raw_isFlushWB = raw_resp && (c.bits.param === TLPermissions.FLUSH_WB)
     val resp = Mux(c.valid, raw_resp, RegEnable(raw_resp, c.valid))
     val isFlush = Mux(c.valid, raw_isFlush, RegEnable(raw_isFlush, c.valid))
+    val isFlushWB = Mux(c.valid, raw_isFlushWB, RegEnable(raw_isFlushWB, c.valid))
     val flushed = RegInit(Bool(false))
 
     // Handling of C is broken into two cases:
@@ -161,14 +163,16 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready && io.way_valid, !req_block && !buf_block && !set_block)
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
 
-    io.req.valid := (!resp || isFlush && !flushed) && c.valid && first && !buf_block && !set_block
+    val req_valid = (!resp || isFlush && !flushed) && c.valid && first && !buf_block && !set_block
     putbuffer.io.push.valid := !resp && c.valid && hasData && !req_block && !set_block
     when (!resp && c.valid && first && hasData && !req_block && !buf_block) { lists_set := freeOH }
 
+    io.req.valid := req_valid
     val put = Mux(first, freeIdx, RegEnable(freeIdx, first))
 
     io.req.bits.prio   := Mux(isFlush, VecInit(1.U(3.W).asBools), VecInit(4.U(3.W).asBools))
     io.req.bits.control:= isFlush
+    io.req.bits.control1 := isFlushWB
     io.req.bits.opcode := c.bits.opcode
     io.req.bits.param  := c.bits.param
     io.req.bits.size   := c.bits.size
@@ -178,6 +182,8 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.req.bits.tag    := tag
     io.req.bits.put    := put
     io.req.bits.domainId := c.bits.domainId
+
+
 
     putbuffer.io.push.bits.index := put
     putbuffer.io.push.bits.data.data    := c.bits.data

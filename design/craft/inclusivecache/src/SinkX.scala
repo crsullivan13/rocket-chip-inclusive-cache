@@ -39,11 +39,12 @@ class SinkX(params: InclusiveCacheParameters) extends Module
   io.req.valid := x.valid
   params.ccover(x.valid && !x.ready, "SINKX_STALL", "Backpressure when accepting a control message")
 
-  io.req.bits.prio   := VecInit(1.U(3.W).asBools) // same prio as A
-  io.req.bits.control:= true.B
-  io.req.bits.opcode := 0.U
-  io.req.bits.param  := 0.U
-  io.req.bits.size   := params.offsetBits.U
+  io.req.bits.prio   := Vec(UInt(1, width=3).asBools) // same prio as A
+  io.req.bits.control:= Bool(true)
+  io.req.bits.control1 := Bool(false)
+  io.req.bits.opcode := UInt(0)
+  io.req.bits.param  := UInt(0)
+  io.req.bits.size   := UInt(params.offsetBits)
   // The source does not matter, because a flush command never allocates a way.
   // However, it must be a legal source, otherwise assertions might spuriously fire.
   io.req.bits.source := params.inner.client.clients.map(_.sourceId.start).min.U

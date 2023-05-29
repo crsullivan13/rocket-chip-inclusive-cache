@@ -106,8 +106,9 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   val (tag, set, offset) = params.parseAddress(a.bits.address)
   val put = Mux(first, freeIdx, RegEnable(freeIdx, first))
 
-  io.req.bits.prio   := VecInit(1.U(3.W).asBools)
-  io.req.bits.control:= false.B
+  io.req.bits.prio   := Vec(UInt(1, width=3).asBools)
+  io.req.bits.control:= Bool(false)
+  io.req.bits.control1 := Bool(false)
   io.req.bits.opcode := a.bits.opcode
   io.req.bits.param  := a.bits.param
   io.req.bits.size   := a.bits.size
