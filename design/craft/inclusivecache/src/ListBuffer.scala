@@ -20,6 +20,7 @@ package sifive.blocks.inclusivecache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util._
+import chisel3.dontTouch
 
 case class ListBufferParameters[T <: Data](gen: T, queues: Int, entries: Int, bypass: Boolean)
 {
@@ -77,6 +78,11 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
 
   val pop_head = head.read(io.pop.bits)
   val pop_valid = valid(io.pop.bits)
+
+  dontTouch(push_tail)
+  dontTouch(pop_head)
+  dontTouch(push_valid)
+  dontTouch(pop_valid)
 
   // Bypass push data to the peek port
   io.data := (if (!params.bypass) data.read(pop_head) else Mux(!pop_valid, io.push.bits.data, data.read(pop_head)))

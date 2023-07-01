@@ -23,6 +23,7 @@ import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import chisel3.experimental.dataview._
+import chisel3.dontTouch
 
 import midas.targetutils.SynthesizePrintf
 
@@ -165,6 +166,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val scheduleTag = Mux1H(mshr_selectOH, mshrs.map(_.io.status.bits.tag))
   val scheduleSet = Mux1H(mshr_selectOH, mshrs.map(_.io.status.bits.set))
 
+  dontTouch(mshr_selectOH2)
+  dontTouch(robin_request)
+  dontTouch(mshr_request)
+  dontTouch(robin_filter)
   // When an MSHR wins the schedule, it has lowest priority next time
   when (mshr_request.orR) { robin_filter := ~rightOR(mshr_selectOH) }
 
@@ -267,6 +272,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   params.ccover(mshr_selectOH.orR && will_reload, "SCHEDULER_RELOAD", "Back-to-back service of two requests")
   params.ccover(mshr_selectOH.orR && will_pop, "SCHEDULER_POP", "Service of a secondary miss")
 
+  dontTouch(requests.io)
+
   // Repeat the above logic, but without the fan-in
   mshrs.zipWithIndex.foreach { case (m, i) =>
     val sel = mshr_selectOH(i)
@@ -301,6 +308,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val mshr_validOH = Cat(mshrs.map(_.io.status.valid).reverse)
   val mshr_free = (~mshr_validOH & prioFilter).orR
 
+  dontTouch(mshr_validOH)
+  dontTouch(mshr_free)
+
   // Fanout the request to the appropriate handler (if any)
   val bypassQueue = schedule.reload && bypassMatches
   val request_alloc_cases =
@@ -310,10 +320,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   request.ready := request_alloc_cases || (queue && (bypassQueue || requests.io.push.ready))
   val alloc_uses_directory = request.valid && request_alloc_cases
 
-  when ( request.valid && !request.ready ) {
-    SynthesizePrintf(printf("Request not ready, alloc_cases %d, queue %d, bypassQueue %d, reqeusts push ready %d, domain %d\n",
-                              request_alloc_cases, queue, bypassQueue, requests.io.push.ready, request.bits.domainId))
-  }
+  dontTouch(requests.io)
 
   // When a request goes through, it will need to hit the Directory
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
@@ -349,6 +356,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       m.io.allocate.bits.repeat := false.B
     }
   }
+
+  dontTouch(request)
 
   when (request.valid && nestB && !bc_mshr.io.status.valid && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
     bc_mshr.io.allocate.valid := true.B

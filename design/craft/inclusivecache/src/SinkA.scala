@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import chisel3.dontTouch
 
 import midas.targetutils.SynthesizePrintf
 
@@ -97,6 +98,13 @@ class SinkA(params: InclusiveCacheParameters) extends Module
 
   params.ccover(a.valid && buf_block, "SINKA_BUF_STALL", "No space in putbuffer for beat")
   params.ccover(a.valid && set_block, "SINKA_SET_STALL", "No space in putbuffer for request")
+
+  val ignore = Wire(UInt(0, width = params.inner.bundle.sourceBits))
+  ignore := ~UInt(0, width = params.inner.bundle.sourceBits)
+  dontTouch(ignore)
+
+  val are_we_ignoring = a.bits.source =/= ignore
+  dontTouch(are_we_ignoring)
 
   a.ready := !req_block && !buf_block && !set_block
   io.req.valid := a.valid && first && !buf_block && !set_block
