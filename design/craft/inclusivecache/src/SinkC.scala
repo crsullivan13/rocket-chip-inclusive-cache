@@ -158,8 +158,15 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     }
 
     c.ready := Mux(raw_resp, Mux(!raw_isFlush, !hasData || bs_adr.ready,
-                   (!hasData && !req_block) || (bs_adr.ready && io.way_valid)),
+                   (!hasData && !req_block) || (hasData && bs_adr.ready)),
                    !req_block && !buf_block && !set_block)
+
+
+    val debug_c = Wire(Decoupled(new TLBundleC(params.inner.bundle)))
+    debug_c.valid := c.valid
+    debug_c.ready := c.ready
+    debug_c.bits := c.bits
+    dontTouch(debug_c)
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready && io.way_valid, !req_block && !buf_block && !set_block)
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
 

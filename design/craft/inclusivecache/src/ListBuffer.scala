@@ -45,11 +45,13 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
     val data  = Output(params.gen)
   })
 
-  val valid = RegInit(0.U(params.queues.W))
-  val head  = Mem(params.queues, UInt(params.entryBits.W))
-  val tail  = Mem(params.queues, UInt(params.entryBits.W))
-  val used  = RegInit(0.U(params.entries.W))
-  val next  = Mem(params.entries, UInt(params.entryBits.W))
+  dontTouch(io.data)
+
+  val valid = RegInit(UInt(0, width=params.queues))
+  val head  = Mem(params.queues, UInt(width = params.entryBits))
+  val tail  = Mem(params.queues, UInt(width = params.entryBits))
+  val used  = RegInit(UInt(0, width=params.entries))
+  val next  = Mem(params.entries, UInt(width = params.entryBits))
   val data  = Mem(params.entries, params.gen)
 
   val freeOH = ~(leftOR(~used) << 1) & ~used
@@ -62,6 +64,11 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
 
   val push_tail = tail.read(io.push.bits.index)
   val push_valid = valid(io.push.bits.index)
+
+  dontTouch(valid_set)
+  dontTouch(valid_clr)
+  dontTouch(used_set)
+  dontTouch(used_clr)
 
   io.push.ready := !used.andR
   when (io.push.fire) {

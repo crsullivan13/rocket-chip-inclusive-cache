@@ -356,7 +356,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       m.io.allocate.bits.repeat := false.B
     }
   }
-
+  
   dontTouch(request)
 
   when (request.valid && nestB && !bc_mshr.io.status.valid && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
