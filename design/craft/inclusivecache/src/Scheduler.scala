@@ -272,6 +272,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   params.ccover(mshr_selectOH.orR && will_reload, "SCHEDULER_RELOAD", "Back-to-back service of two requests")
   params.ccover(mshr_selectOH.orR && will_pop, "SCHEDULER_POP", "Service of a secondary miss")
 
+  dontTouch(a_pop)
+  dontTouch(b_pop)
+  dontTouch(c_pop)
   dontTouch(requests.io)
 
   // Repeat the above logic, but without the fan-in

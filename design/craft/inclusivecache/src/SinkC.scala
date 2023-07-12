@@ -158,7 +158,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     }
 
     c.ready := Mux(raw_resp, Mux(!raw_isFlush, !hasData || bs_adr.ready,
-                   (!hasData && !req_block) || (hasData && bs_adr.ready)),
+                   (!hasData && !req_block) || (hasData && bs_adr.ready && !req_block)),
                    !req_block && !buf_block && !set_block)
 
 
