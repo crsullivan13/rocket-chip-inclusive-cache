@@ -170,7 +170,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready && io.way_valid, !req_block && !buf_block && !set_block)
     //c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
 
-    val req_valid = (!resp || isFlush && !flushed) && c.valid && first && !buf_block && !set_block
+    val req_valid = (!resp || isFlush && !flushed) && c.valid && first && (isFlush || (!buf_block && !set_block))
     putbuffer.io.push.valid := !resp && c.valid && hasData && !req_block && !set_block
     when (!resp && c.valid && first && hasData && !req_block && !buf_block) { lists_set := freeOH }
 
