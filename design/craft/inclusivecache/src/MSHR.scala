@@ -303,7 +303,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   val invalid = Wire(new DirectoryEntry(params))
   invalid.dirty   := Bool(false)
-  invalid.state   := Mux(request.control1, Mux(request.opcode === ProbeAckData, TRUNK, TIP), INVALID)
+  invalid.state   := Mux(request.control1, TIP, INVALID)
   invalid.clients := Mux(request.control1, meta.clients, UInt(0))
   invalid.tag     := Mux(request.control1, meta.tag, UInt(0))
 
