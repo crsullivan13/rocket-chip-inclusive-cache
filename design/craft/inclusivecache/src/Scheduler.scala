@@ -292,6 +292,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     m.io.allocate.bits.viewAsSupertype(chiselTypeOf(requests.io.data)) := Mux(bypass, WireInit(new QueuedRequest(params), init = request.bits), requests.io.data)
     m.io.allocate.bits.set := m.io.status.bits.set
     m.io.allocate.bits.repeat := m.io.allocate.bits.tag === m.io.status.bits.tag
+    m.io.allocate.bits.from_buffer := !bypass
     m.io.allocate.valid := sel && will_reload
   }
 
@@ -354,26 +355,29 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val mshr_insertOH = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>
     when (request.valid && alloc && s && !mshr_uses_directory_assuming_no_bypass) {
-      m.io.allocate.valid := true.B
-      m.io.allocate.bits.viewAsSupertype(chiselTypeOf(request.bits)) := request.bits
-      m.io.allocate.bits.repeat := false.B
+      m.io.allocate.valid := Bool(true)
+      m.io.allocate.bits := request.bits
+      m.io.allocate.bits.repeat := Bool(false)
+      m.io.allocate.bits.from_buffer := Bool(false)
     }
   }
   
   dontTouch(request)
 
   when (request.valid && nestB && !bc_mshr.io.status.valid && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
-    bc_mshr.io.allocate.valid := true.B
-    bc_mshr.io.allocate.bits.viewAsSupertype(chiselTypeOf(request.bits)) := request.bits
-    bc_mshr.io.allocate.bits.repeat := false.B
+    bc_mshr.io.allocate.valid := Bool(true)
+    bc_mshr.io.allocate.bits := request.bits
+    bc_mshr.io.allocate.bits.repeat := Bool(false)
+    bc_mshr.io.allocate.bits.from_buffer := Bool(false)
     assert (!request.bits.prio(0))
   }
   bc_mshr.io.allocate.bits.prio(0) := false.B
 
   when (request.valid && nestC && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
-    c_mshr.io.allocate.valid := true.B
-    c_mshr.io.allocate.bits.viewAsSupertype(chiselTypeOf(request.bits)) := request.bits
-    c_mshr.io.allocate.bits.repeat := false.B
+    c_mshr.io.allocate.valid := Bool(true)
+    c_mshr.io.allocate.bits := request.bits
+    c_mshr.io.allocate.bits.repeat := Bool(false)
+    c_mshr.io.allocate.bits.from_buffer := Bool(false)
     assert (!request.bits.prio(0))
     assert (!request.bits.prio(1))
   }
@@ -403,7 +407,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // wire MSHRs to sinkC bs_adr fire
   for (i <- 0 until params.mshrs) {
-    mshrs(i).io.sinkc_bs_fire := mshrs(i).io.status.valid && mshrs(i).io.status.bits.set === sinkC.io.set && sinkC.io.bs_adr.fire
+    mshrs(i).io.sinkc_bs_fire := (mshrs(i).io.status.valid && mshrs(i).io.status.bits.set === sinkC.io.bs_set && sinkC.io.bs_adr.fire) //|| (sinkC.io.opcode =/= TLMessages.ProbeAckData)
   }
 
   // Beat buffer connections between components

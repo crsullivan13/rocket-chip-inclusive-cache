@@ -36,7 +36,8 @@ class QueuedRequest(params: InclusiveCacheParameters) extends InclusiveCacheBund
 
 class FullRequest(params: InclusiveCacheParameters) extends QueuedRequest(params)
 {
-  val set = UInt(params.setBits.W)
+  val set = UInt(width = params.setBits)
+  val from_buffer = Bool() //request is from the list buffer
 }
 
 class AllocateRequest(params: InclusiveCacheParameters) extends FullRequest(params)
