@@ -214,8 +214,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   //   c_valid_wb := Bool(true)
   //   c_flushed := Bool(true)
   // }
+
+  val is_flush_data = request.control && request.opcode === ProbeAckData
   
-  io.schedule.bits.c.valid := Mux(request.control, (bs_adr_fire || request.opcode =/= ProbeAckData || request.from_buffer) && c_valid, c_valid) //Mux(request.control1 && request.opcode === ProbeAckData, c_valid_wb, c_valid) // RegNext(RegNext(RegNext(c_valid)))
+  io.schedule.bits.c.valid := Mux(is_flush_data, (bs_adr_fire || request.from_buffer) && c_valid, c_valid) //Mux(request.control1 && request.opcode === ProbeAckData, c_valid_wb, c_valid) // RegNext(RegNext(RegNext(c_valid)))
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant && w_releaseack
   io.schedule.bits.e.valid := !s_grantack && w_grantfirst
   //io.schedule.bits.x.valid := !s_flush && w_releaseack
@@ -236,7 +238,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     //   c_valid_wb := Bool(false)
     // }
                                     s_rprobe     := Bool(true)
-    when (w_rprobeackfirst && (!(request.control && !bs_adr_fire) || request.from_buffer || request.opcode =/= ProbeAckData))       { s_release    := Bool(true) }
+    when (w_rprobeackfirst && (!(is_flush_data && !bs_adr_fire) || request.from_buffer))       { s_release    := Bool(true) }
                                     s_pprobe     := Bool(true)
     when (s_release && s_pprobe)  { s_acquire    := Bool(true) }
     when (w_releaseack)           { s_flush      := Bool(true) }
@@ -565,6 +567,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     }
   }
 
+  assert(!(!request.control && request.control1))
+  
   when (io.allocate.valid && io.allocate.bits.repeat) {
     bypass(S_INVALID,   f || p) // Can lose permissions (probe/flush)
     bypass(S_BRANCH,    b)      // MMIO read to read-only device

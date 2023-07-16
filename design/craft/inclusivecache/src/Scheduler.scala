@@ -292,8 +292,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     m.io.allocate.bits.viewAsSupertype(chiselTypeOf(requests.io.data)) := Mux(bypass, WireInit(new QueuedRequest(params), init = request.bits), requests.io.data)
     m.io.allocate.bits.set := m.io.status.bits.set
     m.io.allocate.bits.repeat := m.io.allocate.bits.tag === m.io.status.bits.tag
-    m.io.allocate.bits.from_buffer := !bypass
     m.io.allocate.valid := sel && will_reload
+    m.io.allocate.bits.from_buffer := !bypass
   }
 
   // Determine which of the queued requests to pop (supposing will_pop)
@@ -326,8 +326,11 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   dontTouch(requests.io)
 
+  val sinkc_uses_directory = requests.io.push.valid && sinkC.io.is_flush
+  val forward_directory_to_sinkc = RegNext(sinkc_uses_directory)
+
   // When a request goes through, it will need to hit the Directory
-  directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
+  directory.io.read.valid := mshr_uses_directory || alloc_uses_directory || sinkc_uses_directory
   directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
 
@@ -392,16 +395,24 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     m.io.directory.bits := directory.io.result.bits
   }
 
+  val way_valid_counter = Counter(4)
+  val temp_way = Wire(UInt(width = params.wayBits))
+  when(forward_directory_to_sinkc) {
+    way_valid_counter.inc()
+    temp_way := directory.io.result.bits.way
+  } .elsewhen(way_valid_counter.value =/= 0.U) {
+    way_valid_counter.inc()
+  }
   // MSHR response meta-data fetch
   sinkC.io.way :=
-    Mux(bc_mshr.io.status.valid && bc_mshr.io.status.bits.set === sinkC.io.set,
+    Mux(forward_directory_to_sinkc || way_valid_counter.value =/= 0.U, temp_way,
+      Mux(bc_mshr.io.status.valid && bc_mshr.io.status.bits.set === sinkC.io.set,
       bc_mshr.io.status.bits.way,
       Mux1H(abc_mshrs.map(m => m.io.status.valid && m.io.status.bits.set === sinkC.io.set),
-            abc_mshrs.map(_.io.status.bits.way)))
-  val s0_way_valid = (bc_mshr.io.status.valid && (bc_mshr.io.status.bits.set === sinkC.io.set)) ||
-    abc_mshrs.map(m => m.io.status.valid && (m.io.status.bits.set === sinkC.io.set)).reduce(_||_)
+            abc_mshrs.map(_.io.status.bits.way))))
+  val s0_way_valid = mshrs.map(m => m.io.status.valid && (m.io.status.bits.set === sinkC.io.set) && (m.io.status.bits.tag === sinkC.io.tag)).reduce(_||_)
   val s1_way_valid = RegNext(s0_way_valid)
-  sinkC.io.way_valid := Mux(s0_way_valid, s1_way_valid, s0_way_valid)
+  sinkC.io.way_valid := Mux(forward_directory_to_sinkc || way_valid_counter.value =/= 0.U, Bool(true), Mux(s0_way_valid, s1_way_valid, s0_way_valid))
   sinkD.io.way := Vec(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := Vec(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 

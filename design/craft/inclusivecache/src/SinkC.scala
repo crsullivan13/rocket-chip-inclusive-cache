@@ -47,11 +47,13 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val resp = Valid(new SinkCResponse(params)) // ProbeAck
     val c = Flipped(Decoupled(new TLBundleC(params.inner.bundle)))
     // Find 'way' via MSHR CAM lookup
+    val tag = UInt(width = params.tagBits)
     val set = UInt(width = params.setBits)
     val way = UInt(width = params.wayBits).flip
-    val opcode = UInt(width = 3.W)
     val bs_set = UInt(width = params.setBits)
     val way_valid = Bool().flip
+    val is_flush = Bool()
+    val opcode = UInt(width = 3)
     // ProbeAck write-back
     val bs_adr = Decoupled(new BankedStoreInnerAddress(params))
     val bs_dat = new BankedStoreInnerPoison(params)
@@ -90,6 +92,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val isFlush = Mux(c.valid, raw_isFlush, RegEnable(raw_isFlush, c.valid))
     val isFlushWB = Mux(c.valid, raw_isFlushWB, RegEnable(raw_isFlushWB, c.valid))
     val flushed = RegInit(Bool(false))
+    val way_valid = Wire(Bool(false))
 
     // Handling of C is broken into two cases:
     //   ProbeAck
@@ -103,7 +106,8 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     assert (!(c.valid && c.bits.corrupt), "Data poisoning unavailable")
 
     io.set := Mux(c.valid, set, RegEnable(set, c.valid)) // finds us the way
-    io.opcode := Mux(c.valid, c.bits.opcode, RegEnable(c.bits.opcode, c.valid))
+    io.tag := Mux(c.valid, tag, RegEnable(tag, c.valid))
+    io.is_flush := Mux(c.valid, raw_isFlush && first && hasData, RegEnable(raw_isFlush && first && hasData, c.valid))
 
     // Cut path from inner C to the BankedStore SRAM setup
     //   ... this makes it easier to layout the L2 data banks far away
@@ -205,6 +209,14 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     
     when (isFlush && last) {
       flushed := Bool(false)
+    }
+
+    when (io.way_valid) {
+      way_valid := Bool(true)
+    }
+
+    when (last) {
+      way_valid := Bool(false)
     }
 
     // Grant access to pop the data
