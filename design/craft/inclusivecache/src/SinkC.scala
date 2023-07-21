@@ -52,6 +52,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val way = UInt(width = params.wayBits).flip
     val bs_set = UInt(width = params.setBits)
     val way_valid = Bool().flip
+    val way_pushed = Bool().flip
     val is_flush = Bool()
     val opcode = UInt(width = 3)
     // ProbeAck write-back
@@ -92,8 +93,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val isFlush = Mux(c.valid, raw_isFlush, RegEnable(raw_isFlush, c.valid))
     val isFlushWB = Mux(c.valid, raw_isFlushWB, RegEnable(raw_isFlushWB, c.valid))
     val flushed = RegInit(Bool(false))
-    val way_valid = Wire(Bool(false))
-
+    
+    val way_valid_push = RegInit(Bool(false))
+    val prev_bs_adr = RegInit(Bool(false))
     // Handling of C is broken into two cases:
     //   ProbeAck
     //     if hasData, must be written to BankedStore
@@ -114,7 +116,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val bs_adr = Wire(chiselTypeOf(io.bs_adr))
     io.bs_adr <> Queue(bs_adr, 1, pipe=true)
     io.bs_dat.data   := RegEnable(c.bits.data,    bs_adr.fire())
-    bs_adr.valid     := ((resp && !isFlush) || (isFlush && io.way_valid)) && (!first || (c.valid && hasData))
+    bs_adr.valid     := ((resp && !isFlush) || (isFlush && (io.way_valid || way_valid_push))) && (!first || (c.valid && hasData))
     dontTouch(resp)
     //bs_adr.valid     := (isFlush || resp) && (!first || (c.valid && hasData))
     bs_adr.bits.noop := !c.valid
@@ -165,7 +167,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     }
 
     c.ready := Mux(raw_resp, Mux(!raw_isFlush, !hasData || bs_adr.ready,
-                   (!hasData && !req_block) || (hasData && bs_adr.ready && io.way_valid && !req_block)),
+                   (!hasData && !req_block) || (hasData && bs_adr.ready && (io.way_valid || way_valid_push) && !req_block)),
                    !req_block && !buf_block && !set_block)
 
 
@@ -211,12 +213,18 @@ class SinkC(params: InclusiveCacheParameters) extends Module
       flushed := Bool(false)
     }
 
-    when (io.way_valid) {
-      way_valid := Bool(true)
+    // my stuff
+    when (io.way_pushed) {
+      way_valid_push := Bool(true)
     }
 
-    when (last) {
-      way_valid := Bool(false)
+    when (bs_adr.fire && isFlush) {
+      prev_bs_adr := Bool(true)
+    } 
+
+    when (prev_bs_adr && !bs_adr.valid) {
+      way_valid_push := Bool(false)
+      prev_bs_adr := Bool(false)
     }
 
     // Grant access to pop the data

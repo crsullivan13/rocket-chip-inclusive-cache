@@ -326,7 +326,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   dontTouch(requests.io)
 
-  val sinkc_uses_directory = requests.io.push.valid && sinkC.io.is_flush
+  val sinkc_uses_directory = requests.io.push.valid && request.bits.control && sinkC.io.is_flush
   val forward_directory_to_sinkc = RegNext(sinkc_uses_directory)
 
   // When a request goes through, it will need to hit the Directory
@@ -395,24 +395,23 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     m.io.directory.bits := directory.io.result.bits
   }
 
-  val way_valid_counter = Counter(4)
+  // val way_valid_counter = Counter(8)
   val temp_way = Wire(UInt(width = params.wayBits))
   when(forward_directory_to_sinkc) {
-    way_valid_counter.inc()
     temp_way := directory.io.result.bits.way
-  } .elsewhen(way_valid_counter.value =/= 0.U) {
-    way_valid_counter.inc()
   }
+
+  sinkC.io.way_pushed := forward_directory_to_sinkc
   // MSHR response meta-data fetch
   sinkC.io.way :=
-    Mux(forward_directory_to_sinkc || way_valid_counter.value =/= 0.U, temp_way,
+    Mux(forward_directory_to_sinkc, temp_way,
       Mux(bc_mshr.io.status.valid && bc_mshr.io.status.bits.set === sinkC.io.set,
       bc_mshr.io.status.bits.way,
       Mux1H(abc_mshrs.map(m => m.io.status.valid && m.io.status.bits.set === sinkC.io.set),
             abc_mshrs.map(_.io.status.bits.way))))
   val s0_way_valid = mshrs.map(m => m.io.status.valid && (m.io.status.bits.set === sinkC.io.set) && (m.io.status.bits.tag === sinkC.io.tag)).reduce(_||_)
   val s1_way_valid = RegNext(s0_way_valid)
-  sinkC.io.way_valid := Mux(forward_directory_to_sinkc || way_valid_counter.value =/= 0.U, Bool(true), Mux(s0_way_valid, s1_way_valid, s0_way_valid))
+  sinkC.io.way_valid := Mux(forward_directory_to_sinkc, Bool(true), Mux(s0_way_valid, s1_way_valid, s0_way_valid))
   sinkD.io.way := Vec(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := Vec(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 
