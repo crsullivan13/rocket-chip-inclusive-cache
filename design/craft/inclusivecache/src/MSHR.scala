@@ -311,7 +311,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   val invalid = Wire(new DirectoryEntry(params))
   invalid.dirty   := Bool(false)
-  invalid.state   := Mux(request.control1, TIP, INVALID)
+  invalid.state   := Mux(request.control1, meta.state, INVALID)
   invalid.clients := Mux(request.control1, meta.clients, UInt(0))
   invalid.tag     := Mux(request.control1, meta.tag, UInt(0))
 
@@ -330,12 +330,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
                                      !(request.opcode === PutFullData || request.opcode === AcquirePerm)
   io.schedule.bits.a.bits.source  := UInt(0)
   io.schedule.bits.a.bits.domainId := request.domainId
-  io.schedule.bits.b.bits.param   := Mux(request.control1, toB, Mux(!s_rprobe, toN, Mux(request.prio(1), request.param, Mux(req_needT, toN, toB))))
+  io.schedule.bits.b.bits.param   := Mux(request.control1, toT, Mux(!s_rprobe, toN, Mux(request.prio(1), request.param, Mux(req_needT, toN, toB))))
   io.schedule.bits.b.bits.tag     := Mux(!s_rprobe, meta.tag, request.tag)
   io.schedule.bits.b.bits.set     := request.set
   io.schedule.bits.b.bits.clients := meta.clients & ~excluded_client
   io.schedule.bits.c.bits.opcode  := Mux(meta.dirty, ReleaseData, Release)
-  io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, Mux(request.control1, TtoB, TtoN))
+  io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, Mux(request.control1, TtoT, TtoN))
   io.schedule.bits.c.bits.source  := UInt(0)
   io.schedule.bits.c.bits.domainId := request.domainId
   io.schedule.bits.c.bits.tag     := meta.tag
