@@ -96,6 +96,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     
     val way_valid_push = RegInit(Bool(false))
     val prev_bs_adr = RegInit(Bool(false))
+    val way_buffered = Reg(UInt(width = params.wayBits))
     // Handling of C is broken into two cases:
     //   ProbeAck
     //     if hasData, must be written to BankedStore
@@ -120,7 +121,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     dontTouch(resp)
     //bs_adr.valid     := (isFlush || resp) && (!first || (c.valid && hasData))
     bs_adr.bits.noop := !c.valid
-    bs_adr.bits.way  := io.way
+    bs_adr.bits.way  := Mux(way_valid_push, way_buffered, io.way)
     bs_adr.bits.set  := io.set
     bs_adr.bits.beat := Mux(c.valid, beat, RegEnable(beat + bs_adr.ready.asUInt, c.valid))
     bs_adr.bits.mask := ~0.U(params.innerMaskBits.W)
@@ -216,6 +217,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     // my stuff
     when (io.way_pushed) {
       way_valid_push := Bool(true)
+      way_buffered := io.way
     }
 
     when (bs_adr.fire && isFlush) {
