@@ -277,6 +277,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // The client asking us to act is proof they don't have permissions.
   val excluded_client = Mux(meta.hit && request.prio(0) && skipProbeN(request.opcode, params.cache.hintsSkipProbe), req_clientBit, 0.U)
+  io.schedule.bits.a.bits.domainId := request.domainId
   io.schedule.bits.a.bits.tag     := request.tag
   io.schedule.bits.a.bits.set     := request.set
   io.schedule.bits.a.bits.param   := Mux(req_needT, Mux(meta.hit, BtoT, NtoT), NtoB)

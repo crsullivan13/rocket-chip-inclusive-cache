@@ -27,6 +27,9 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
+import midas.targetutils.SynthesizePrintf
+import midas.targetutils.PerfCounter
+
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
@@ -114,11 +117,22 @@ class InclusiveCache(
     val clientIds = node.edges.in.headOption.map(_.client.clients.map(_.sourceId).sortBy(_.start))
     node.edges.in.foreach { e => require(e.client.clients.map(_.sourceId).sortBy(_.start) == clientIds.get) }
 
+    println(s"IDS: ${clientIds}")
+    clientIds.zipWithIndex.foreach {case (c, i) => println(s"ClientID: ${c(i).start}") }
+
     // Use the natural ordering of clients (just like in Directory)
     node.edges.in.headOption.foreach { n =>
       println(s"L${cache.level} InclusiveCache Client Map:")
       n.client.clients.zipWithIndex.foreach { case (c,i) =>
-        println(s"\t${i} <= ${c.name}")
+        println(s"\t${i} <= ${c.name} ${c.sourceId.start}")
+      }
+      println("")
+    }
+
+    node.edges.out.foreach { n =>
+      println(s"L${cache.level} InclusiveCache Client Map Out:")
+      n.client.clients.zipWithIndex.foreach { case (c,i) =>
+        println(s"\t${i} <= ${c.name} ${c.sourceId} ${c.nodePath} ${c.visibility}")
       }
       println("")
     }
@@ -153,6 +167,7 @@ class InclusiveCache(
       (!flushInValid, flushOutValid)
     }), RegFieldDesc("Flush64", "Flush the phsyical address equal to the 64-bit written data from the cache"))
 
+    println(s"Number of banks in the cache: ${node.edges.in.size}")
     // Information about the cache configuration
     val banksR  = RegField.r(8, node.edges.in.size.U,               RegFieldDesc("Banks",
       "Number of banks in the cache", reset=Some(node.edges.in.size)))
@@ -171,6 +186,8 @@ class InclusiveCache(
       )
     }
 
+
+    var bankCount = 0
     // Create the L2 Banks
     val mods = (node.in zip node.out) map { case ((in, edgeIn), (out, edgeOut)) =>
       edgeOut.manager.managers.foreach { m =>
@@ -181,6 +198,9 @@ class InclusiveCache(
           s"Any probing managers behind the L2 must support acquireT($xfer) " +
           s"but ${m.name} only supports (${m.supportsAcquireT})!")
       }
+
+      val bankNum = RegInit(bankCount.U)
+      bankCount = bankCount + 1
 
       val params = InclusiveCacheParameters(cache, micro, control.isDefined, edgeIn, edgeOut)
       val scheduler = Module(new InclusiveCacheBankScheduler(params)).suggestName("inclusive_cache_bank_sched")
@@ -207,6 +227,16 @@ class InclusiveCache(
       out.a.bits.address := params.restoreAddress(scheduler.io.out.a.bits.address)
       in .b.bits.address := params.restoreAddress(scheduler.io.in .b.bits.address)
       out.c.bits.address := params.restoreAddress(scheduler.io.out.c.bits.address)
+
+      when ( in.a.fire ) {
+        //midas.targetutils.PerfCounter.identity(in.a.bits.address, "l2_access", "L2 access address at sample time")
+        SynthesizePrintf(printf("L2 access %d %x %d %d\n", in.a.bits.source, in.a.bits.address, in.a.bits.domainId, scheduler.io.in.a.bits.domainId))
+      }
+
+      when ( out.a.fire ) {
+        //midas.targetutils.PerfCounter.identity(in.a.bits.address, "l2_miss", "L2 miss address at sample time")
+        SynthesizePrintf(printf("L2 miss %d %x %d %d\n", out.a.bits.source, out.a.bits.address, out.a.bits.domainId, scheduler.io.out.a.bits.domainId))
+      }
 
       scheduler
     }

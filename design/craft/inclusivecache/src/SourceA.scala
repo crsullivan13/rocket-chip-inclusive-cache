@@ -28,6 +28,7 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val param  = UInt(3.W)
   val source = UInt(params.outer.bundle.sourceBits.W)
   val block  = Bool()
+  val domainId = UInt(2.W)
 }
 
 class SourceA(params: InclusiveCacheParameters) extends Module
@@ -47,6 +48,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   a.valid := io.req.valid
   params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
 
+  a.bits.domainId := io.req.bits.domainId
   a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
   a.bits.param   := io.req.bits.param
   a.bits.size    := params.offsetBits.U

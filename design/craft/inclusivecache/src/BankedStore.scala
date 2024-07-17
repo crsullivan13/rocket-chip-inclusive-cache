@@ -78,6 +78,7 @@ class BankedStore(params: InclusiveCacheParameters) extends Module
   val rowEntries = params.cache.sizeBytes / rowBytes
   val rowBits = log2Ceil(rowEntries)
   val numBanks = rowBytes / params.micro.writeBytes
+  println(s"Num banks: ${numBanks}")
   val codeBits = 8*params.micro.writeBytes
 
   val cc_banks = Seq.tabulate(numBanks) {
@@ -119,6 +120,7 @@ class BankedStore(params: InclusiveCacheParameters) extends Module
     val beatBytes = if (b.bits.inner) innerBytes else outerBytes
     val ports = beatBytes / params.micro.writeBytes
     val bankBits = log2Ceil(numBanks / ports)
+    println(s"bankBits: $bankBits")
     val words = Seq.tabulate(ports) { i =>
       val data = d((i + 1) * 8 * params.micro.writeBytes - 1, i * 8 * params.micro.writeBytes)
       data

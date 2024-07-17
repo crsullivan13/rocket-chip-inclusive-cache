@@ -39,6 +39,8 @@ class SinkX(params: InclusiveCacheParameters) extends Module
   io.req.valid := x.valid
   params.ccover(x.valid && !x.ready, "SINKX_STALL", "Backpressure when accepting a control message")
 
+  // We shouldn't need to care about the domain of flush command
+  io.req.bits.domainId := 0.U
   io.req.bits.prio   := VecInit(1.U(3.W).asBools) // same prio as A
   io.req.bits.control:= true.B
   io.req.bits.opcode := 0.U

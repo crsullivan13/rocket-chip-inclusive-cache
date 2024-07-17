@@ -45,6 +45,8 @@ class SinkA(params: InclusiveCacheParameters) extends Module
     val pb_beat = new PutBufferAEntry(params)
   })
 
+  io.req.bits.domainId := io.a.bits.domainId
+
   // No restrictions on the type of buffer
   val a = params.micro.innerBuf.a(io.a)
 

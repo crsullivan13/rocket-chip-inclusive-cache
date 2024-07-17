@@ -55,6 +55,11 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val rel_beat = new PutBufferCEntry(params)
   })
 
+  // TODO: do we care about the domainId on Channel C?
+  // I think this depends on where we decide to do regulation (cache vs. dram)
+  // if we do regulation in dram, then we should propogate the channel A request domainId that causes the write back
+  io.req.bits.domainId := 0.U
+
   if (params.firstLevel) {
     // Tie off unused ports
     io.req.valid := false.B
