@@ -20,6 +20,7 @@ package sifive.blocks.inclusivecache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
+import midas.targetutils.SynthesizePrintf
 
 class SourceCRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -111,6 +112,10 @@ class SourceC(params: InclusiveCacheParameters) extends Module
   c.bits.address := params.expandAddress(s3_req.tag, s3_req.set, 0.U)
   c.bits.data    := io.bs_dat.data
   c.bits.corrupt := false.B
+
+  // when ( c.fire && c.bits.opcode === TLMessages.ReleaseData ) {
+  //   SynthesizePrintf(printf("C released data\n"))
+  // }
 
   // We never accept at the front-end unless we're sure things will fit
   assert(!c.valid || c.ready)

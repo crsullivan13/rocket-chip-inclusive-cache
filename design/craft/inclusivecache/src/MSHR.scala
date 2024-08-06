@@ -26,6 +26,7 @@ import TLMessages._
 import MetaData._
 import chisel3.PrintableHelper
 import chisel3.experimental.dataview.BundleUpcastable
+import midas.targetutils.SynthesizePrintf
 
 class ScheduleRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -92,6 +93,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val sinkd     = Flipped(Valid(new SinkDResponse(params)))
     val sinke     = Flipped(Valid(new SinkEResponse(params)))
     val nestedwb  = Flipped(new NestedWriteback(params))
+    val throttleAcquire = Input(Vec(4, Bool()))
   })
 
   val request_valid = RegInit(false.B)
@@ -179,9 +181,13 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   assert (!io.status.bits.nestB || !io.status.bits.blockB)
   assert (!io.status.bits.nestC || !io.status.bits.blockC)
 
+  // when ( io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block ) {
+  //   SynthesizePrintf(printf("MSHR DomainID %d should reg AcquireBlk\n", io.schedule.bits.a.bits.domainId))
+  // }
+
   // Scheduler requests
   val no_wait = w_rprobeacklast && w_releaseack && w_grantlast && w_pprobeacklast && w_grantack
-  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe
+  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe //&& !(io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block)
   io.schedule.bits.b.valid := !s_rprobe || !s_pprobe
   io.schedule.bits.c.valid := (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant
@@ -189,9 +195,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.x.valid := !s_flush && w_releaseack
   io.schedule.bits.dir.valid := (!s_release && w_rprobeackfirst) || (!s_writeback && no_wait)
   io.schedule.bits.reload := no_wait
-  io.schedule.valid := io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
+  io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
-                       io.schedule.bits.dir.valid
+                       io.schedule.bits.dir.valid) && !(io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block)
 
   // Schedule completions
   when (io.schedule.ready) {

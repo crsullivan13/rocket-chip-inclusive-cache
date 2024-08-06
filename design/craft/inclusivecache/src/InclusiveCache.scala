@@ -29,6 +29,7 @@ import freechips.rocketchip.tilelink._
 
 import midas.targetutils.SynthesizePrintf
 import midas.targetutils.PerfCounter
+import freechips.rocketchip.util.SeqToAugmentedSeq
 
 class InclusiveCache(
   val cache: CacheParameters,
@@ -178,14 +179,39 @@ class InclusiveCache(
     val lgBlockBytesR = RegField.r(8, log2Ceil(cache.blockBytes).U, RegFieldDesc("lgBlockBytes",
       "Base-2 logarithm of the bytes per cache block", reset=Some(log2Ceil(cache.blockBytes))))
 
+    // Config registers for regulation interface
+    val enGlobal = RegInit(true.B)
+    val periodLen = Reg(UInt(25.W))
+    val maxReads = Reg(Vec(4, UInt(24.W)))
+
+    val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
+
+    val periodLenRegField = RegField(periodLen.getWidth, periodLen, RegFieldDesc("periodLen", "Period length"))
+    
+    val maxReadRegFields = maxReads.zipWithIndex.map { case (reg, i) => RegField(32, reg,
+        RegFieldDesc(s"maxAcc$i", s"Maximum access for domain $i")) }
+
     val regmap = ctlnode.map { c =>
       c.regmap(
         0x000 -> RegFieldGroup("Config", Some("Information about the Cache Configuration"), Seq(banksR, waysR, lgSetsR, lgBlockBytesR)),
         0x200 -> (if (control.get.beatBytes >= 8) Seq(flush64) else Seq()),
-        0x240 -> Seq(flush32)
+        0x240 -> Seq(flush32),
+        0x260 -> Seq(enGlobalField),
+        0x268 -> Seq(periodLenRegField),
+        0x270 -> RegFieldGroup("MaxReads", Some("Per-domain max read config"), maxReadRegFields),
       )
     }
 
+    val periodCount = RegInit(0.U(22.W))
+    val periodReset = Wire(Bool())
+
+    val acquireCount = Reg(Vec(4, UInt(22.W)))
+    val throttleDomain = Reg(Vec(4, Bool()))
+
+    //val clientAcquireActive = Wire(Vec(2, Bool())) 
+
+    periodReset := (periodCount >= 200.U)
+    periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
 
     var bankCount = 0
     // Create the L2 Banks
@@ -204,6 +230,10 @@ class InclusiveCache(
 
       val params = InclusiveCacheParameters(cache, micro, control.isDefined, edgeIn, edgeOut)
       val scheduler = Module(new InclusiveCacheBankScheduler(params)).suggestName("inclusive_cache_bank_sched")
+
+      // scheduler.io.regEnable := enGlobal
+      scheduler.io.throttleAcquire := throttleDomain
+      // scheduler.io.periodReset := periodReset
 
       scheduler.io.in <> in
       out <> scheduler.io.out
@@ -230,16 +260,58 @@ class InclusiveCache(
 
       when ( in.a.fire ) {
         //midas.targetutils.PerfCounter.identity(in.a.bits.address, "l2_access", "L2 access address at sample time")
-        SynthesizePrintf(printf("L2 access %d %x %d %d\n", in.a.bits.source, in.a.bits.address, in.a.bits.domainId, scheduler.io.in.a.bits.domainId))
+        //SynthesizePrintf(printf("L2 access %d %x %d %d\n", in.a.bits.source, in.a.bits.address, in.a.bits.domainId, scheduler.io.in.a.bits.domainId))
       }
 
       when ( out.a.fire ) {
         //midas.targetutils.PerfCounter.identity(in.a.bits.address, "l2_miss", "L2 miss address at sample time")
-        SynthesizePrintf(printf("L2 miss %d %x %d %d\n", out.a.bits.source, out.a.bits.address, out.a.bits.domainId, scheduler.io.out.a.bits.domainId))
+        SynthesizePrintf(printf("L2 miss %d %x %d\n", out.a.bits.source, out.a.bits.address, bankNum)) 
       }
 
       scheduler
     }
+
+    // From each Source A, check which domain is active, increase acquireCount (reads) for active domains
+    mods.foreach( sched => {
+        when ( sched.io.domainAcquire.reduce(_||_) ) {
+          val activeDomains = OHToUInt(sched.io.domainAcquire)
+          acquireCount(activeDomains) := Mux(enGlobal, acquireCount(activeDomains) + 1.U, 0.U)
+        }
+      } 
+    )
+    // activeDomains.foreach( domain => {
+    //   acquireCount(domain) := Mux(enGlobal, Mux(periodReset, 0.U, acquireCount(domain) + 1.U), 0.U)
+    // })
+
+    for ( i <- 0 until 4 ) {
+      when ( periodReset ) {
+        acquireCount(i) := 0.U
+      }
+
+      throttleDomain(i) := enGlobal && acquireCount(i) >= 1.U
+
+      when ( enGlobal && acquireCount(i) >= 1.U ) {
+        SynthesizePrintf(printf("Regulate domain %d with count %d\n", i.U, acquireCount(i)))
+      }
+    }
+
+    // mods.zipWithIndex.map{ case (sched, i) => {
+    //   val aIsAcquire = sched.io.out.a.bits.opcode === TLMessages.AcquireBlock
+
+    //   clientAcquireActive(i) := sched.io.out.a.fire && aIsAcquire
+    // }}
+
+    // for ( i <- 0 until 4 ) {
+    //   val clientAcquireActMasked = clientAcquireActive.zipWithIndex.map { case (act, i) => mods(i).io.out.a.bits.domainId === i.U && act }
+
+    //   acquireCount(i) := Mux(enGlobal, clientAcquireActMasked.reduce(_||_) + Mux(periodReset, 0.U, acquireCount(i)), 0.U)
+
+    //   throttleDomain(i) := enGlobal && acquireCount(i) >= 1.U
+
+    //   when ( throttleDomain(i) ) {
+    //     SynthesizePrintf(printf("Regulate domain %d with count %d\n", i.U, acquireCount(i)))
+    //   }
+    // }
 
     def json = s"""{"banks":[${mods.map(_.json).mkString(",")}]}"""
   }

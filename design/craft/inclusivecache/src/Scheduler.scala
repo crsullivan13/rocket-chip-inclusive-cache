@@ -17,6 +17,8 @@
 
 package sifive.blocks.inclusivecache
 
+import midas.targetutils.SynthesizePrintf
+
 import chisel3._
 import chisel3.experimental.dataview.BundleUpcastable
 import chisel3.util._
@@ -35,6 +37,11 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     // Control port
     val req = Flipped(Decoupled(new SinkXRequest(params)))
     val resp = Decoupled(new SourceXRequest(params))
+
+    val domainAcquire = Output(Vec(4, Bool()))
+    //val periodReset = Input(Bool())
+    //val regEnable = Input(Bool())
+    val throttleAcquire = Input(Vec(4, Bool()))
   })
 
   val sourceA = Module(new SourceA(params))
@@ -103,6 +110,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
   // Consider scheduling an MSHR only if all the resources it requires are available
+  //                                                                             block means opcode is AcquireBlock (ref. SourceA.scala)
+  // Add regulation condition here? -> ((sourceA.io.req.ready && !(shouldRegA && m.io.schedule.bits.a.bits.block)) || !m.io.schedule.bits.a.valid)
+  // Maybe same for writes?         -> ((sourceC.io.req.ready && !(shouldRegC && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)) || !m.io.schedule.bits.c.valid)
   val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) =>
     m.io.schedule.valid && !s &&
       (sourceA.io.req.ready || !m.io.schedule.bits.a.valid) &&
@@ -111,8 +121,18 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
       (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
-      (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
+      (directory.io.write.ready || !m.io.schedule.bits.dir.valid) && 
+      !(m.io.schedule.bits.a.valid && io.throttleAcquire(m.io.schedule.bits.a.bits.domainId) && m.io.schedule.bits.a.bits.block)
   }.reverse)
+
+  // sourceA.io.periodReset := io.periodReset
+  // sourceA.io.regEnable := io.regEnable
+  io.domainAcquire := sourceA.io.domainAcquire
+  sourceA.io.throttleAcquire := io.throttleAcquire
+
+  mshrs.foreach { case m =>
+      m.io.throttleAcquire := io.throttleAcquire
+  }
 
   // Round-robin arbitration of MSHRs
   val robin_filter = RegInit(0.U(params.mshrs.W))
@@ -132,7 +152,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   schedule.c.bits.source := Mux(schedule.c.bits.opcode(1), mshr_select, 0.U) // only set for Release[Data] not ProbeAck[Data]
   schedule.d.bits.sink   := mshr_select
 
-  sourceA.io.req.valid := schedule.a.valid
+  sourceA.io.req.valid := schedule.a.valid && !(io.throttleAcquire(schedule.a.bits.domainId) && schedule.a.bits.block)
   sourceB.io.req.valid := schedule.b.valid
   sourceC.io.req.valid := schedule.c.valid
   sourceD.io.req.valid := schedule.d.valid

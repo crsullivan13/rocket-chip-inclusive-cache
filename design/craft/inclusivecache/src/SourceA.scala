@@ -20,6 +20,7 @@ package sifive.blocks.inclusivecache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
+import midas.targetutils.SynthesizePrintf
 
 class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -36,6 +37,10 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
+    // val regEnable = Input(Bool())
+    // val periodReset = Input(Bool())
+    val domainAcquire = Output(Vec(4,Bool()))
+    val throttleAcquire = Input(Vec(4,Bool()))
   })
 
   // ready must be a register, because we derive valid from ready
@@ -45,8 +50,12 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   io.a <> params.micro.outerBuf.a(a)
 
   io.req.ready := a.ready
-  a.valid := io.req.valid
+  a.valid := io.req.valid && !(io.throttleAcquire(io.req.bits.domainId) && io.req.bits.block)
   params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
+
+  for ( i <- 0 until 4 ) {
+    io.domainAcquire(i) := Mux(a.fire && a.bits.opcode === TLMessages.AcquireBlock && a.bits.domainId === i.U, 1.B, 0.B)
+  }
 
   a.bits.domainId := io.req.bits.domainId
   a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
