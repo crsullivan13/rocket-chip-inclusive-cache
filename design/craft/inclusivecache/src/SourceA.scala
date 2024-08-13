@@ -37,8 +37,6 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
-    // val regEnable = Input(Bool())
-    // val periodReset = Input(Bool())
     val domainAcquire = Output(Vec(4,Bool()))
     val throttleAcquire = Input(Vec(4,Bool()))
   })

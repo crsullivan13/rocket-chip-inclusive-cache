@@ -110,9 +110,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
   // Consider scheduling an MSHR only if all the resources it requires are available
-  //                                                                             block means opcode is AcquireBlock (ref. SourceA.scala)
-  // Add regulation condition here? -> ((sourceA.io.req.ready && !(shouldRegA && m.io.schedule.bits.a.bits.block)) || !m.io.schedule.bits.a.valid)
-  // Maybe same for writes?         -> ((sourceC.io.req.ready && !(shouldRegC && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)) || !m.io.schedule.bits.c.valid)
   val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) =>
     m.io.schedule.valid && !s &&
       (sourceA.io.req.ready || !m.io.schedule.bits.a.valid) &&
@@ -125,8 +122,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       !(m.io.schedule.bits.a.valid && io.throttleAcquire(m.io.schedule.bits.a.bits.domainId) && m.io.schedule.bits.a.bits.block)
   }.reverse)
 
-  // sourceA.io.periodReset := io.periodReset
-  // sourceA.io.regEnable := io.regEnable
   io.domainAcquire := sourceA.io.domainAcquire
   sourceA.io.throttleAcquire := io.throttleAcquire
 

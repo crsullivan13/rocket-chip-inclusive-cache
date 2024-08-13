@@ -187,7 +187,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Scheduler requests
   val no_wait = w_rprobeacklast && w_releaseack && w_grantlast && w_pprobeacklast && w_grantack
-  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe //&& !(io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block)
+  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe && !(io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block)
   io.schedule.bits.b.valid := !s_rprobe || !s_pprobe
   io.schedule.bits.c.valid := (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant
