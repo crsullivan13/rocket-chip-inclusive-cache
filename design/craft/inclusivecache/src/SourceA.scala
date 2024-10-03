@@ -48,7 +48,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   io.a <> params.micro.outerBuf.a(a)
 
   io.req.ready := a.ready
-  a.valid := io.req.valid && !(io.throttleAcquire(io.req.bits.domainId) && io.req.bits.block)
+  a.valid := io.req.valid //&& !(io.throttleAcquire(io.req.bits.domainId) && io.req.bits.block)
   params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
 
   for ( i <- 0 until 4 ) {

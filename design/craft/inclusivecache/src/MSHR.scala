@@ -197,7 +197,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.reload := no_wait
   io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
-                       io.schedule.bits.dir.valid) && !(io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block)
+                       io.schedule.bits.dir.valid) && !(io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block && io.schedule.bits.a.valid)
 
   // Schedule completions
   when (io.schedule.ready) {

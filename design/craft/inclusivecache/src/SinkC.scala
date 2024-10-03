@@ -117,6 +117,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.resp.bits.param  := c.bits.param
     io.resp.bits.data   := hasData
 
+    //println(s"Rel beats: ${params.relBeats}")
     val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferCEntry(params), params.relLists, params.relBeats, false)))
     val lists = RegInit(0.U(params.relLists.W))
 
