@@ -58,7 +58,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
   // TODO: do we care about the domainId on Channel C?
   // I think this depends on where we decide to do regulation (cache vs. dram)
   // if we do regulation in dram, then we should propogate the channel A request domainId that causes the write back
-  io.req.bits.domainId := 0.U
+  // io.req.bits.domainId := c.bits.domainId
 
   if (params.firstLevel) {
     // Tie off unused ports
@@ -144,6 +144,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
 
     val put = Mux(first, freeIdx, RegEnable(freeIdx, first))
 
+    io.req.bits.domainId := c.bits.domainId
     io.req.bits.prio   := VecInit(4.U(3.W).asBools)
     io.req.bits.control:= false.B
     io.req.bits.opcode := c.bits.opcode

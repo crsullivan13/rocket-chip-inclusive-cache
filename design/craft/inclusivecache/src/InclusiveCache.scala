@@ -229,13 +229,11 @@ class InclusiveCache(
       out.c.bits.address := params.restoreAddress(scheduler.io.out.c.bits.address)
 
       when ( in.a.fire ) {
-        //midas.targetutils.PerfCounter.identity(in.a.bits.address, "l2_access", "L2 access address at sample time")
-        SynthesizePrintf(printf("L2 access %d %x %d %d\n", in.a.bits.source, in.a.bits.address, in.a.bits.domainId, scheduler.io.in.a.bits.domainId))
+        //SynthesizePrintf(printf("L2 access %d %x %d %d\n", in.a.bits.source, in.a.bits.address, in.a.bits.domainId, scheduler.io.in.a.bits.domainId))
       }
 
       when ( out.a.fire ) {
-        //midas.targetutils.PerfCounter.identity(in.a.bits.address, "l2_miss", "L2 miss address at sample time")
-        SynthesizePrintf(printf("L2 miss %d %x %d %d\n", out.a.bits.source, out.a.bits.address, out.a.bits.domainId, scheduler.io.out.a.bits.domainId))
+        //SynthesizePrintf(printf("L2 miss %d %x %d\n", out.a.bits.source, out.a.bits.address, out.a.bits.domainId))
       }
 
       scheduler

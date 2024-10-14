@@ -288,6 +288,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.b.bits.tag     := Mux(!s_rprobe, meta.tag, request.tag)
   io.schedule.bits.b.bits.set     := request.set
   io.schedule.bits.b.bits.clients := meta.clients & ~excluded_client
+  io.schedule.bits.c.bits.domainId := request.domainId
   io.schedule.bits.c.bits.opcode  := Mux(meta.dirty, ReleaseData, Release)
   io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, TtoN)
   io.schedule.bits.c.bits.source  := 0.U
