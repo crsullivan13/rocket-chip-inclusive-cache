@@ -233,7 +233,11 @@ class InclusiveCache(
       }
 
       when ( out.a.fire ) {
-        //SynthesizePrintf(printf("L2 miss %d %x %d\n", out.a.bits.source, out.a.bits.address, out.a.bits.domainId))
+        SynthesizePrintf(printf("L2 miss %d %d\n", out.a.bits.source, out.a.bits.domainId))
+      }
+
+      when ( out.c.fire ) {
+        SynthesizePrintf(printf("L2 write-back %d %d\n", out.c.bits.source, out.c.bits.domainId))
       }
 
       scheduler
