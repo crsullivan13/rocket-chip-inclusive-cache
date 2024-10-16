@@ -535,6 +535,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     assert (!request_valid || (no_wait && io.schedule.fire))
     request_valid := true.B
     request := io.allocate.bits
+    request.domainId := Mux(io.allocate.bits.opcode === TLMessages.AcquireBlock || io.allocate.bits.opcode === TLMessages.AcquirePerm,
+                             io.allocate.bits.domainId, request.domainId)
   }
 
   // Create execution plan
