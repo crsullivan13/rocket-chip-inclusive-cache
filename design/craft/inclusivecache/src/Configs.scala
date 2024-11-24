@@ -29,6 +29,7 @@ import freechips.rocketchip.util._
 case class InclusiveCacheParams(
   ways: Int,
   sets: Int,
+  numCPUs: Int,
   writeBytes: Int, // backing store update granularity
   portFactor: Int, // numSubBanks = (widest TL port * portFactor) / writeBytes
   memCycles: Int,  // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
@@ -48,21 +49,25 @@ class WithInclusiveCache(
   capacityKB: Int = 512,
   outerLatencyCycles: Int = 40,
   subBankingFactor: Int = 4,
-  hintsSkipProbe: Boolean = false
+  hintsSkipProbe: Boolean = false,
+  nCPUs: Int = 2
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(BankedL2Key, site).nBanks),
       ways = nWays,
       memCycles = outerLatencyCycles,
+      numCPUs = nCPUs,
       writeBytes = site(XLen)/8,
       portFactor = subBankingFactor)
   case BankedL2Key => up(BankedL2Key, site).copy(coherenceManager = { context =>
     implicit val p = context.p
     val sbus = context.tlBusWrapperLocationMap(SBUS)
     val cbus = context.tlBusWrapperLocationMap.lift(CBUS).getOrElse(sbus)
+    val ibus = context.ibus
     val InclusiveCacheParams(
       ways,
       sets,
+      nCPUs,
       writeBytes,
       portFactor,
       memCycles,
@@ -78,6 +83,7 @@ class WithInclusiveCache(
         level = 2,
         ways = ways,
         sets = sets,
+        numCPUs = nCPUs,
         blockBytes = sbus.blockBytes,
         beatBytes = sbus.beatBytes,
         hintsSkipProbe = hintsSkipProbe),
@@ -99,6 +105,7 @@ class WithInclusiveCache(
       if (dcacheMMIO) None else Some(x)
     }
 
+    ibus.fromSync := l2.intSrc
     val filter = LazyModule(new TLFilter(cfilter = skipMMIO))
     val l2_inner_buffer = bufInnerExterior()
     val l2_outer_buffer = bufOuterExterior()

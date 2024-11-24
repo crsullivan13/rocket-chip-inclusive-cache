@@ -20,6 +20,7 @@ package sifive.blocks.inclusivecache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
+import midas.targetutils.SynthesizePrintf
 
 class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -47,6 +48,10 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   io.req.ready := a.ready
   a.valid := io.req.valid
   params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
+
+  when ( a.valid && !a.ready ) {
+    SynthesizePrintf(printf(s"Source A backpressured when issue Acquire for domain %d\n", io.req.bits.domainId))
+  }
 
   a.bits.domainId := io.req.bits.domainId
   a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)

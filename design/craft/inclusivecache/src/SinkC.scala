@@ -21,6 +21,8 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import midas.targetutils.SynthesizePrintf
+
 
 class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -117,6 +119,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.resp.bits.param  := c.bits.param
     io.resp.bits.data   := hasData
 
+    // 2 queues, each one have 2 * beats (4 or 8) entries
+    println(s"REL BEATS ${params.relBeats}")
+    println(s"REL LISTS ${params.relLists}")
     val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferCEntry(params), params.relLists, params.relBeats, false)))
     val lists = RegInit(0.U(params.relLists.W))
 
@@ -135,6 +140,18 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     params.ccover(c.valid && !raw_resp && req_block, "SINKC_REQ_STALL", "No MSHR available to sink request")
     params.ccover(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
     params.ccover(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
+
+    // when ( c.valid && !raw_resp && req_block ) {
+    //   SynthesizePrintf(printf("No MSHR available to sink C request, domain %d\n", c.bits.domainId))
+    // }
+
+    // when ( c.valid && !raw_resp && buf_block ) {
+    //   SynthesizePrintf(printf("No space in putbuffer C for beat, domain %d\n", c.bits.domainId))
+    // }
+
+    // when ( c.valid && !raw_resp && set_block ) {
+    //   SynthesizePrintf(printf("No space in putbuffer C for request, domain %d\n", c.bits.domainId))
+    // }
 
     c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
 

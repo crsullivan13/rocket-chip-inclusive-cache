@@ -26,6 +26,7 @@ import TLMessages._
 import MetaData._
 import chisel3.PrintableHelper
 import chisel3.experimental.dataview.BundleUpcastable
+import midas.targetutils.SynthesizePrintf
 
 class ScheduleRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -456,9 +457,20 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     transition(S_TRUNK_CD, S_TRUNK_C,  c && p) // probed while acquire
   }
 
+  // when ( !s_pprobe || !s_rprobe ) {
+  //   SynthesizePrintf(printf("Domain %d probes from LLC\n", request.domainId))
+  // }
+
+  
+
   // Handle response messages
   val probe_bit = params.clientBit(io.sinkc.bits.source)
   val last_probe = (probes_done | probe_bit) === (meta.clients & ~excluded_client)
+
+  // when ( last_probe ) {
+  //   SynthesizePrintf(printf("Domain %d done probing from LLC\n", request.domainId))
+  // }
+
   val probe_toN = isToN(io.sinkc.bits.param)
   if (!params.firstLevel) when (io.sinkc.valid) {
     params.ccover( probe_toN && io.schedule.bits.b.bits.param === toB, "MSHR_PROBE_FULL", "Client downgraded to N when asked only to do B")

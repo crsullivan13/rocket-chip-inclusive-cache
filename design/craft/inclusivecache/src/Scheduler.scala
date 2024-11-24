@@ -23,6 +23,8 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import midas.targetutils.SynthesizePrintf
+
 
 class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Module
 {
@@ -167,6 +169,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   sinkC.io.req.ready := directory.io.ready && request.ready
   sinkX.io.req.ready := directory.io.ready && request.ready && !sinkC.io.req.valid
   sinkA.io.req.ready := directory.io.ready && request.ready && !sinkC.io.req.valid && !sinkX.io.req.valid
+
+  when ( !sinkA.io.req.ready && sinkA.io.req.valid ) {
+    SynthesizePrintf(printf("SinkA valid stalled, domain %d\n", sinkA.io.req.bits.domainId))
+  }
 
   // If no MSHR has been assigned to this set, we need to allocate one
   val setMatches = Cat(mshrs.map { m => m.io.status.valid && m.io.status.bits.set === request.bits.set }.reverse)
