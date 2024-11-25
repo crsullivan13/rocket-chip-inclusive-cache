@@ -31,6 +31,7 @@ class SourceCRequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val set    = UInt(params.setBits.W)
   val way    = UInt(params.wayBits.W)
   val dirty  = Bool()
+  val domainId = UInt(2.W)
 }
 
 class SourceC(params: InclusiveCacheParameters) extends Module
@@ -104,6 +105,7 @@ class SourceC(params: InclusiveCacheParameters) extends Module
   val s3_last = RegEnable(s2_last, s3_latch)
 
   val c = Wire(chiselTypeOf(io.c))
+  c.bits.domainId := s3_req.domainId
   c.valid        := s3_valid
   c.bits.opcode  := s3_req.opcode
   c.bits.param   := s3_req.param

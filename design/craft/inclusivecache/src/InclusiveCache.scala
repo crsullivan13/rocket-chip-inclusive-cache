@@ -180,7 +180,7 @@ class InclusiveCache(
       "Base-2 logarithm of the bytes per cache block", reset=Some(log2Ceil(cache.blockBytes))))
 
     // Config registers for regulation interface
-    val enGlobal = RegInit(true.B)
+    val enGlobal = RegInit(false.B) //change to false before synthesis
     val periodLen = Reg(UInt(25.W))
     val maxReads = Reg(Vec(4, UInt(24.W)))
 
@@ -208,7 +208,7 @@ class InclusiveCache(
     val acquireCount = RegInit(VecInit(Seq.fill(4)(0.U(22.W))))
     val throttleDomain = Reg(Vec(4, Bool()))
 
-    periodReset := (periodCount >= 200.U)
+    periodReset := (periodCount >= periodLen)
     periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
 
     var bankCount = 0
@@ -261,7 +261,8 @@ class InclusiveCache(
 
       when ( out.a.fire ) {
         //midas.targetutils.PerfCounter.identity(in.a.bits.address, "l2_miss", "L2 miss address at sample time")
-        SynthesizePrintf(printf("L2 miss %d %x %d\n", out.a.bits.source, out.a.bits.address, BankHelper.bankIndexHelper(out.a.bits.address, 0x3e000.U))) 
+        //BankHelper.bankIndexHelper(out.a.bits.address, 0x70000.U)
+        SynthesizePrintf(printf("L2 miss %d %x %d\n", bankNum, out.a.bits.address, out.a.bits.domainId)) 
       }
 
       scheduler
@@ -275,11 +276,11 @@ class InclusiveCache(
 
         when ( sched.io.domainAcquire.reduce(_||_) && PopCount(sched.io.domainAcquire) =/= 1.U ) {
           printf("More than one domain is active -- NOT GOOD\n")
-          printf("Bad domains %x\n", sched.io.domainAcquire.asUInt)
+          SynthesizePrintf(printf("Bad domains %x\n", sched.io.domainAcquire.asUInt))
         }
 
         when ( sched.io.domainAcquire.reduce(_||_) ) {
-          printf("Active domains %x\n", sched.io.domainAcquire.asUInt)
+          SynthesizePrintf(printf("Active domains %x\n", sched.io.domainAcquire.asUInt))
           act := OHToUInt(sched.io.domainAcquire)
         } .otherwise {
           act := nDomains.U // nothing is active, make sure active reflects this
@@ -292,9 +293,9 @@ class InclusiveCache(
     for ( i <- 0 until nDomains ) {
       val isDomainActive = activeDomains.map(_ === i.U).reduce(_||_)
       acquireCount(i) := Mux(enGlobal, Mux(periodReset, 0.U, acquireCount(i) + isDomainActive), 0.U)
-      throttleDomain(i) := enGlobal && ( ( acquireCount(i) + isDomainActive ) >= 1.U )
+      throttleDomain(i) := enGlobal && ( ( acquireCount(i) + isDomainActive ) >= maxReads(i) )
 
-      when ( enGlobal && ( ( acquireCount(i) + isDomainActive ) >= 1.U ) ) {
+      when ( enGlobal && ( ( acquireCount(i) + isDomainActive ) >= maxReads(i) ) ) {
         SynthesizePrintf(printf("Regulate domain %d with count %d\n", i.U, acquireCount(i)))
       }
     }

@@ -38,7 +38,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     val req = Flipped(Decoupled(new SourceARequest(params)))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
     val domainAcquire = Output(Vec(4,Bool()))
-    val throttleAcquire = Input(Vec(4,Bool()))
+    //val throttleAcquire = Input(Vec(4,Bool()))
   })
 
   // ready must be a register, because we derive valid from ready

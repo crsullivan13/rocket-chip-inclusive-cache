@@ -197,7 +197,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.reload := no_wait
   io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
-                       io.schedule.bits.dir.valid) && !(io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block && io.schedule.bits.a.valid)
+                       io.schedule.bits.dir.valid) //&& !(io.throttleAcquire(io.schedule.bits.a.bits.domainId) && io.schedule.bits.a.bits.block && io.schedule.bits.a.valid)
 
   // Schedule completions
   when (io.schedule.ready) {
@@ -294,6 +294,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.b.bits.tag     := Mux(!s_rprobe, meta.tag, request.tag)
   io.schedule.bits.b.bits.set     := request.set
   io.schedule.bits.b.bits.clients := meta.clients & ~excluded_client
+  io.schedule.bits.c.bits.domainId := request.domainId
   io.schedule.bits.c.bits.opcode  := Mux(meta.dirty, ReleaseData, Release)
   io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, TtoN)
   io.schedule.bits.c.bits.source  := 0.U
@@ -540,6 +541,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     assert (!request_valid || (no_wait && io.schedule.fire))
     request_valid := true.B
     request := io.allocate.bits
+    request.domainId := Mux(io.allocate.bits.opcode === TLMessages.AcquireBlock || io.allocate.bits.opcode === TLMessages.AcquirePerm,
+                          io.allocate.bits.domainId, request.domainId)
   }
 
   // Create execution plan

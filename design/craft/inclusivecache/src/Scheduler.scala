@@ -118,12 +118,12 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
       (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
-      (directory.io.write.ready || !m.io.schedule.bits.dir.valid) //&& 
-      //!(m.io.schedule.bits.a.valid && io.throttleAcquire(m.io.schedule.bits.a.bits.domainId) && m.io.schedule.bits.a.bits.block)
+      (directory.io.write.ready || !m.io.schedule.bits.dir.valid) && 
+      !(m.io.schedule.bits.a.valid && io.throttleAcquire(m.io.schedule.bits.a.bits.domainId) && m.io.schedule.bits.a.bits.block)
   }.reverse)
 
   io.domainAcquire := sourceA.io.domainAcquire
-  sourceA.io.throttleAcquire := io.throttleAcquire
+  //sourceA.io.throttleAcquire := io.throttleAcquire
 
   mshrs.foreach { case m =>
       m.io.throttleAcquire := io.throttleAcquire
