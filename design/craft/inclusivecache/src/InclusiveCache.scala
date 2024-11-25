@@ -191,7 +191,7 @@ class InclusiveCache(
     // Regulation
     
     val periodCntr = Reg(UInt(wPeriod.W))
-    val periodCntrReset = RegInit(false.B)
+    val periodCntrReset = VecInit(Seq.fill(cache.numCPUs)(RegInit(false.B)))
     
 
     val LLCAccessCountersReg = AccessCounters.zipWithIndex.map{ case (reg, i) => 
@@ -208,47 +208,43 @@ class InclusiveCache(
     val CoreBudgetRegs = CoreBudgets.zipWithIndex.map { case (reg, i) => 
         (0x400 + i * 8) -> Seq(RegField(reg.getWidth, reg, RegFieldDesc(s"CoreBudgetCore${i}", s"CoreBudget")))
     }
-    val PeriodResetReg = Seq((0x500) -> Seq(RegField(periodCntrReset.getWidth, periodCntrReset, RegFieldDesc(s"PeriodLength", s"PeriodLength"))))
-    periodCntr := Mux(periodCntrReset, 0.U, periodCntr + 1.U)
-
-    when (periodCntrReset) // Reset all
-    {
-        for (i <- 0 until nBanks)
-        {
-          for (j <- 0 until cache.numCPUs)
-          {
-            PerBankAccessCounters(i)(j) := 0.U
-            PerBankMissCounters(i)(j) := 0.U
-          }
-        }
-
-        for (j <- 0 until cache.numCPUs)
-        {
-            MissCounters(j) := 0.U
-            AccessCounters(j) := 0.U
-            hasInterrupted(j) := false.B
-        }
+    val PeriodResetRegs = periodCntrReset.zipWithIndex.map{ case (reg, i) => 
+        (0x500 + i * 8) -> Seq(RegField(reg.getWidth, reg, RegFieldDesc(s"PeriodLength${i}", s"PeriodLength${i}")))
     }
-    .otherwise // Calculate per core total accesses
+    //periodCntr := Mux(periodCntrReset, 0.U, periodCntr + 1.U)
+
+    for (j <- 0 until cache.numCPUs)
     {
-        for (j <- 0 until cache.numCPUs)
-        {
-          val tmpSumMiss = VecInit(Seq.fill(nBanks)(0.U(64.W)))
-          val tmpSumAccess = VecInit(Seq.fill(nBanks)(0.U(64.W)))
-          tmpSumMiss(0) := PerBankMissCounters(0)(j)
-          tmpSumAccess(0) := PerBankAccessCounters(0)(j)
-          for (i <- 1 until nBanks)
+      when (periodCntrReset(j)) // Reset all
+      {
+          for (i <- 0 until nBanks)
           {
-            tmpSumMiss(i) := PerBankMissCounters(i)(j) + tmpSumMiss(i-1)
-            tmpSumAccess(i) := PerBankAccessCounters(i)(j) + tmpSumAccess(i-1)
+              PerBankAccessCounters(i)(j) := 0.U
+              PerBankMissCounters(i)(j) := 0.U
           }
 
-          MissCounters(j) := tmpSumMiss(nBanks - 1)
-          AccessCounters(j) := tmpSumAccess(nBanks- 1)
-        }    
+          MissCounters(j) := 0.U
+          AccessCounters(j) := 0.U
+          hasInterrupted(j) := false.B
+
+      }
+      .otherwise // Calculate per core total accesses
+      {
+            val tmpSumMiss = VecInit(Seq.fill(nBanks)(0.U(64.W)))
+            val tmpSumAccess = VecInit(Seq.fill(nBanks)(0.U(64.W)))
+            tmpSumMiss(0) := PerBankMissCounters(0)(j)
+            tmpSumAccess(0) := PerBankAccessCounters(0)(j)
+            for (i <- 1 until nBanks)
+            {
+              tmpSumMiss(i) := PerBankMissCounters(i)(j) + tmpSumMiss(i-1)
+              tmpSumAccess(i) := PerBankAccessCounters(i)(j) + tmpSumAccess(i-1)
+            }
+
+            MissCounters(j) := tmpSumMiss(nBanks - 1)
+            AccessCounters(j) := tmpSumAccess(nBanks- 1)
+
+      }
     }
-
-
 
     /* 
       Core will generate an interrupt if it is over budget and it is the first interrupt,
@@ -260,7 +256,7 @@ class InclusiveCache(
     {
         val overBudget = MissCounters(i) >= CoreBudgets(i) && EnableInterrupt(i)        // we should take this out to do 1ms regulation
         coreDoInterrupt(i) := (overBudget && EnableInterrupt(i) && !hasInterrupted(i)) //|| (hasInterrupted(i) && periodCntrReset)
-        when (!periodCntrReset) // do not drive signal twice
+        when (!periodCntrReset(i)) // do not drive signal twice
         {
           hasInterrupted(i) := coreDoInterrupt(i) || hasInterrupted(i)
         } 
@@ -285,24 +281,7 @@ class InclusiveCache(
 
     println(s"Number of banks in the cache: ${node.edges.in.size}")
     // Information about the cache configuration
-    // val banksR  = RegField.r(8, node.edges.in.size.U,               RegFieldDesc("Banks",
-    //   "Number of banks in the cache", reset=Some(node.edges.in.size)))
-    // val waysR   = RegField.r(8, cache.ways.U,                       RegFieldDesc("Ways",
-    //   "Number of ways per bank", reset=Some(cache.ways)))
-    // val lgSetsR = RegField.r(8, log2Ceil(cache.sets).U,             RegFieldDesc("lgSets",
-    //   "Base-2 logarithm of the sets per bank", reset=Some(log2Ceil(cache.sets))))
-    // val lgBlockBytesR = RegField.r(8, log2Ceil(cache.blockBytes).U, RegFieldDesc("lgBlockBytes",
-    //   "Base-2 logarithm of the bytes per cache block", reset=Some(log2Ceil(cache.blockBytes))))
-
-    // val regmap = ctlnode.map { c =>
-    //   c.regmap(
-    //     0x000 -> RegFieldGroup("Config", Some("Information about the Cache Configuration"), Seq(banksR, waysR, lgSetsR, lgBlockBytesR)),
-    //     0x200 -> (if (control.get.beatBytes >= 8) Seq(flush64) else Seq()),
-    //     0x240 -> Seq(flush32)
-    //   )
-    // }
-
-        val banksR  = Seq(0 -> Seq(RegField.r(8, node.edges.in.size.U,               RegFieldDesc("Banks",
+    val banksR  = Seq(0 -> Seq(RegField.r(8, node.edges.in.size.U,               RegFieldDesc("Banks",
       "Number of banks in the cache", reset=Some(node.edges.in.size)))))
     val waysR   = Seq(0x8 -> Seq(RegField.r(8, cache.ways.U,                       RegFieldDesc("Ways",
       "Number of ways per bank", reset=Some(cache.ways)))))
@@ -354,12 +333,16 @@ class InclusiveCache(
       val isWbToDRAM = (outCIsWb && scheduler.io.out.c.fire)
       val toDRAM = (isMiss || isWbToDRAM)
       val isAccess = ((aIsWrite || aIsRead || (aIsInstFetch && countInstFetch)) && in.a.fire) || (cIsWb && in.c.fire) 
-      when (!periodCntrReset)
+      when (!periodCntrReset(outDomainID))
       {
           when (toDRAM)
           {
               PerBankMissCounters(i)(outDomainID)  := PerBankMissCounters(i)(outDomainID) + 1.U
           }
+      }
+
+      when (!periodCntrReset(inDomainID))
+      {
           when (isAccess)
           {
               PerBankAccessCounters(i)(inDomainID) := PerBankAccessCounters(i)(inDomainID) + 1.U
