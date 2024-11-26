@@ -292,7 +292,7 @@ class InclusiveCache(
     val flush64Reg = Seq(0x200 ->  Seq(flush64))
     val flush32Reg = Seq(0x240 -> Seq(flush32))
 
-    val mmreg = banksR ++ waysR ++ lgSetsR ++ lgBlockBytesR ++LLCAccessCountersReg ++ LLCMissCountersReg ++ CountInstFetchReg ++ EnableIntRegs ++ CoreBudgetRegs ++ PeriodResetReg ++ flush64Reg ++ flush32Reg
+    val mmreg = banksR ++ waysR ++ lgSetsR ++ lgBlockBytesR ++LLCAccessCountersReg ++ LLCMissCountersReg ++ CountInstFetchReg ++ EnableIntRegs ++ CoreBudgetRegs ++ PeriodResetRegs ++ flush64Reg ++ flush32Reg
 
 
     val regmap = ctlnode.map{ c =>
