@@ -58,6 +58,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   io.in.d <> sourceD.io.d
   io.resp <> sourceX.io.x
 
+  when ( sourceA.io.a.fire && !io.out.a.ready ) {
+    SynthesizePrintf(printf("SourceA fires when outA isn't ready??\n"))
+  }
+
   val sinkA = Module(new SinkA(params))
   val sinkC = Module(new SinkC(params))
   val sinkD = Module(new SinkD(params))
@@ -80,6 +84,14 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val bc_mshr = mshrs.init.last
   val c_mshr = mshrs.last
   val nestedwb = Wire(new NestedWriteback(params))
+
+  when ( bc_mshr.io.status.valid ) {
+    SynthesizePrintf(printf("BC MSHR is in use\n"))
+  }
+
+  when ( c_mshr.io.status.valid ) {
+    SynthesizePrintf(printf("C MSHR is in use\n"))
+  }
 
   // Deliver messages from Sinks to MSHRs
   mshrs.zipWithIndex.foreach { case (m, i) =>
@@ -118,12 +130,12 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
       (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
-      (directory.io.write.ready || !m.io.schedule.bits.dir.valid) && 
-      !(m.io.schedule.bits.a.valid && io.throttleAcquire(m.io.schedule.bits.a.bits.domainId) && m.io.schedule.bits.a.bits.block)
+      (directory.io.write.ready || !m.io.schedule.bits.dir.valid) &&
+      !(io.throttleAcquire(m.io.schedule.bits.a.bits.domainId) && m.io.schedule.bits.a.bits.block)
   }.reverse)
 
   io.domainAcquire := sourceA.io.domainAcquire
-  //sourceA.io.throttleAcquire := io.throttleAcquire
+  sourceA.io.throttleAcquire := io.throttleAcquire
 
   mshrs.foreach { case m =>
       m.io.throttleAcquire := io.throttleAcquire

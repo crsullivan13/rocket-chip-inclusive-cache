@@ -180,7 +180,7 @@ class InclusiveCache(
       "Base-2 logarithm of the bytes per cache block", reset=Some(log2Ceil(cache.blockBytes))))
 
     // Config registers for regulation interface
-    val enGlobal = RegInit(false.B) //change to false before synthesis
+    val enGlobal = RegInit(false.B) // Change before synth
     val periodLen = Reg(UInt(25.W))
     val maxReads = Reg(Vec(4, UInt(24.W)))
 
@@ -206,9 +206,9 @@ class InclusiveCache(
     val periodReset = Wire(Bool())
 
     val acquireCount = RegInit(VecInit(Seq.fill(4)(0.U(22.W))))
-    val throttleDomain = Reg(Vec(4, Bool()))
+    val throttleDomain = Wire(Vec(4, Bool()))
 
-    periodReset := (periodCount >= periodLen)
+    periodReset := (periodCount >= periodLen) // Change before synth
     periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
 
     var bankCount = 0
@@ -293,9 +293,9 @@ class InclusiveCache(
     for ( i <- 0 until nDomains ) {
       val isDomainActive = activeDomains.map(_ === i.U).reduce(_||_)
       acquireCount(i) := Mux(enGlobal, Mux(periodReset, 0.U, acquireCount(i) + isDomainActive), 0.U)
-      throttleDomain(i) := enGlobal && ( ( acquireCount(i) + isDomainActive ) >= maxReads(i) )
+      throttleDomain(i) := enGlobal && ( ( acquireCount(i) ) >= maxReads(i) ) // Change before synth
 
-      when ( enGlobal && ( ( acquireCount(i) + isDomainActive ) >= maxReads(i) ) ) {
+      when ( enGlobal && ( ( acquireCount(i) ) >= maxReads(i) ) ) { // Change before synth
         SynthesizePrintf(printf("Regulate domain %d with count %d\n", i.U, acquireCount(i)))
       }
     }

@@ -38,30 +38,74 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     val req = Flipped(Decoupled(new SourceARequest(params)))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
     val domainAcquire = Output(Vec(4,Bool()))
-    //val throttleAcquire = Input(Vec(4,Bool()))
+    val throttleAcquire = Input(Vec(4,Bool()))
   })
 
   // ready must be a register, because we derive valid from ready
   require (!params.micro.outerBuf.a.pipe && params.micro.outerBuf.a.isDefined)
 
-  val a = Wire(chiselTypeOf(io.a))
-  io.a <> params.micro.outerBuf.a(a)
+  // val a = Wire(chiselTypeOf(io.a))
+  // val buffer = params.micro.outerBuf.a(a)
+  // io.a <> buffer
+  // buffer.ready := io.a.ready && !(io.throttleAcquire(buffer.bits.domainId) && buffer.bits.opcode === TLMessages.AcquireBlock)
+  // io.a.valid := buffer.valid && !(io.throttleAcquire(buffer.bits.domainId) && buffer.bits.opcode === TLMessages.AcquireBlock)
 
-  io.req.ready := a.ready
-  a.valid := io.req.valid //&& !(io.throttleAcquire(io.req.bits.domainId) && io.req.bits.block)
-  params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
+  val domainAs = Seq.fill(4)(Wire(chiselTypeOf(io.a)))
+  val domainBuffs = domainAs.map( a => { params.micro.outerBuf.a(a) } )
+
+  val domainReadys = Reg(Vec(4, Bool()))
+
+  val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle),4))
 
   for ( i <- 0 until 4 ) {
-    io.domainAcquire(i) := Mux(a.fire && a.bits.opcode === TLMessages.AcquireBlock && a.bits.domainId === i.U, 1.B, 0.B)
+    io.domainAcquire(i) := Mux(io.a.fire && io.a.bits.opcode === TLMessages.AcquireBlock && io.a.bits.domainId === i.U, 1.B, 0.B)
+
+    val a = domainAs(i)
+    val buffer = domainBuffs(i)
+
+    domainReadys(i) := a.ready
+
+    arb.io.in(i) <> buffer
+    buffer.ready := arb.io.in(i).ready && !(io.throttleAcquire(i) && buffer.bits.opcode === TLMessages.AcquireBlock)
+    arb.io.in(i).valid := buffer.valid && !(io.throttleAcquire(i) && buffer.bits.opcode === TLMessages.AcquireBlock)
+
+    a.valid := io.req.valid && io.req.bits.domainId === i.U
+    params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
+    when ( a.valid && !a.ready ) {
+      SynthesizePrintf(printf("SourceA: Valid req, a not ready\n"))
+    }
+
+    a.bits.domainId := io.req.bits.domainId
+    a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
+    a.bits.param   := io.req.bits.param
+    a.bits.size    := params.offsetBits.U
+    a.bits.source  := io.req.bits.source
+    a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, 0.U)
+    a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
+    a.bits.data    := 0.U
+    a.bits.corrupt := false.B
   }
 
-  a.bits.domainId := io.req.bits.domainId
-  a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
-  a.bits.param   := io.req.bits.param
-  a.bits.size    := params.offsetBits.U
-  a.bits.source  := io.req.bits.source
-  a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, 0.U)
-  a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
-  a.bits.data    := 0.U
-  a.bits.corrupt := false.B
+  io.a <> arb.io.out
+
+  when ( !io.req.ready && io.req.valid ) {
+    SynthesizePrintf(printf("SourceA: Valid req, buff not ready\n"))
+  }
+
+  // this should really be the ready of the buffer that corresponds to incomming request's domain
+  // doing that creates a combinational loop i haven't solved, andR of all for now
+  io.req.ready := domainAs.map( a => a.ready).reduce(_&&_) 
+  //MuxLookup(io.req.bits.domainId, domainAs(0).ready, (0 until 4).map( i => i.U -> domainAs(i).ready ) ) //domainReadys(0.U)
+  //a.valid := io.req.valid //&& !(io.throttleAcquire(io.req.bits.domainId) && io.req.bits.block)
+  //params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
+
+  // a.bits.domainId := io.req.bits.domainId
+  // a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
+  // a.bits.param   := io.req.bits.param
+  // a.bits.size    := params.offsetBits.U
+  // a.bits.source  := io.req.bits.source
+  // a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, 0.U)
+  // a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
+  // a.bits.data    := 0.U
+  // a.bits.corrupt := false.B
 }
