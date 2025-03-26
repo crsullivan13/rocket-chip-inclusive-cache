@@ -40,6 +40,15 @@ class InclusiveCache(
 
   var resourcesOpt: Option[ResourceBindings] = None
 
+  // create our own register node for regulation, easier than using the control node since it could be per-bank
+  // maybe move this later to reduce number of additions to code
+  val regulationDevice = new SimpleDevice("llc-mshr-reg",Seq("llc-mshr-reg"))
+
+  val regnode = new TLRegisterNode(
+    address = Seq(AddressSet(0x21000000, 0x7ff)),
+    device = regulationDevice,
+    beatBytes = 8)
+
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
 
@@ -155,6 +164,16 @@ class InclusiveCache(
 
       scheduler
     }
+
+    var bank = 0
+    val activeDomains = mods.map( sched => {
+
+      when ( sched.io.out.a.fire && sched.io.out.a.bits.opcode === TLMessages.AcquireBlock ) {
+        printf("Bank %d fired acquire\n", bank.U)
+      }
+
+      bank = bank+1
+    })
 
     ctrls.foreach { ctrl =>
       ctrl.module.io.flush_req.ready := false.B

@@ -68,6 +68,7 @@ class WithInclusiveCache(
     implicit val p = context.p
     val sbus = context.tlBusWrapperLocationMap(SBUS)
     val cbus = context.tlBusWrapperLocationMap.lift(CBUS).getOrElse(sbus)
+    val pbus = context.tlBusWrapperLocationMap(PBUS)
     val InclusiveCacheParams(
       ways,
       sets,
@@ -140,6 +141,10 @@ class WithInclusiveCache(
 
     l2.ctrls.foreach {
       _.ctrlnode := cbus.coupleTo("l2_ctrl") { TLBuffer(1) := TLFragmenter(cbus, Some("LLCCtrl")) := _ }
+    }
+
+    pbus.coupleTo("mshr-regulation-regnode") {
+        l2.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
     ElaborationArtefacts.add("l2.json", l2.module.json)
