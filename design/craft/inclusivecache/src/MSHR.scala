@@ -92,6 +92,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val sinkd     = Flipped(Valid(new SinkDResponse(params)))
     val sinke     = Flipped(Valid(new SinkEResponse(params)))
     val nestedwb  = Flipped(new NestedWriteback(params))
+
+    val throttle = Input(Bool())
   })
 
   val request_valid = RegInit(false.B)
@@ -189,9 +191,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.x.valid := !s_flush && w_releaseack
   io.schedule.bits.dir.valid := (!s_release && w_rprobeackfirst) || (!s_writeback && no_wait)
   io.schedule.bits.reload := no_wait
-  io.schedule.valid := io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
+  io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
-                       io.schedule.bits.dir.valid
+                       io.schedule.bits.dir.valid) && !io.throttle
 
   // Schedule completions
   when (io.schedule.ready) {

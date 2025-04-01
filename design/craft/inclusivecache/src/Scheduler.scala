@@ -35,6 +35,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     // Control port
     val req = Flipped(Decoupled(new SinkXRequest(params)))
     val resp = Decoupled(new SourceXRequest(params))
+
+    val throttle = Input(Bool())
+    val outerAcquireFire = Output(Bool())
   })
 
   val sourceA = Module(new SourceA(params))
@@ -45,6 +48,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val sourceX = Module(new SourceX(params))
 
   io.out.a <> sourceA.io.a
+  sourceA.io.throttle := io.throttle
+  io.outerAcquireFire := sourceA.io.outerAcquireFire
   io.out.c <> sourceC.io.c
   io.out.e <> sourceE.io.e
   io.in.b <> sourceB.io.b
@@ -84,6 +89,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     m.io.sinke.bits := sinkE.io.resp.bits
     m.io.nestedwb := nestedwb
   }
+
+  mshrs.foreach { case m => m.io.throttle := io.throttle }
 
   // If the pre-emption BC or C MSHR have a matching set, the normal MSHR must be blocked
   val mshr_stall_abc = abc_mshrs.map { m =>

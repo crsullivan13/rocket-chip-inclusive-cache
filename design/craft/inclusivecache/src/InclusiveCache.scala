@@ -27,6 +27,8 @@ import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey}
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
+import midas.targetutils.SynthesizePrintf
+
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
@@ -165,15 +167,58 @@ class InclusiveCache(
       scheduler
     }
 
+    val enGlobal = RegInit(0.B)
+
+    val outerAcquireCount = Reg(UInt(25.W))
+    val acquireBudget = Reg(UInt(25.W))
+    //acquireBudget := 2.U
+
+    val periodCount = RegInit(0.U(25.W))
+    val periodLength = Reg(UInt(25.W))
+    val periodReset = Wire(Bool())
+
+    //periodLength := 200.U
+
+    periodReset := periodCount >= periodLength
+    periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
+
+    when ( periodReset ) {
+      printf("Reset\n")
+    }
+
+    val tmp = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, Bool()))
+
     var bank = 0
-    val activeDomains = mods.map( sched => {
+    val activeBanks = mods.map( sched => {
+      val doesBankFireAcquire = sched.io.outerAcquireFire
+      tmp(bank.U) := doesBankFireAcquire
 
-      when ( sched.io.out.a.fire && sched.io.out.a.bits.opcode === TLMessages.AcquireBlock ) {
-        printf("Bank %d fired acquire\n", bank.U)
+      when ( doesBankFireAcquire ) {
+        SynthesizePrintf(printf("%d: Bank %d fired acquire\n", periodCount, bank.U))
       }
-
       bank = bank+1
+
+      sched.io.throttle := (outerAcquireCount >= acquireBudget) && enGlobal
+
+      doesBankFireAcquire
     })
+
+    outerAcquireCount := Mux(periodReset || !enGlobal, 0.U + activeBanks.reduce(_||_), activeBanks.reduce(_||_) + outerAcquireCount)
+    when ( activeBanks.reduce(_||_) ) {
+      SynthesizePrintf(printf("Active banks %x\n", PopCount(tmp)))
+    }
+
+    val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
+
+    val periodLenRegField = RegField(periodLength.getWidth, periodLength, RegFieldDesc("periodLength", "Period length"))
+
+    val maxReadRegField = RegField(acquireBudget.getWidth, acquireBudget, RegFieldDesc("acquireBudget", "Read budget"))
+
+    regnode.regmap(
+      0x000 -> Seq(enGlobalField),
+      0x008 -> Seq(periodLenRegField),
+      0x010 -> Seq(maxReadRegField),
+    )
 
     ctrls.foreach { ctrl =>
       ctrl.module.io.flush_req.ready := false.B

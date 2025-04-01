@@ -21,6 +21,8 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 
+import midas.targetutils.SynthesizePrintf
+
 class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val tag    = UInt(params.tagBits.W)
@@ -35,13 +37,24 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
+    val throttle = Input(Bool())
+    val outerAcquireFire = Output(Bool())
   })
 
   // ready must be a register, because we derive valid from ready
   require (!params.micro.outerBuf.a.pipe && params.micro.outerBuf.a.isDefined)
 
   val a = Wire(chiselTypeOf(io.a))
-  io.a <> params.micro.outerBuf.a(a)
+  val buffer = params.micro.outerBuf.a(a)
+  io.a <> buffer
+  buffer.ready := io.a.ready //&& !(io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock)
+  io.a.valid := buffer.valid //&& !(io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock)
+
+  when ( io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock ) {
+    SynthesizePrintf(printf("SourceA throttling\n"))
+  }
+
+  io.outerAcquireFire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
 
   io.req.ready := a.ready
   a.valid := io.req.valid
