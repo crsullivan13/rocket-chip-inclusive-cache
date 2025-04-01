@@ -38,7 +38,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     val req = Flipped(Decoupled(new SourceARequest(params)))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
     val throttle = Input(Bool())
-    val outerAcquireFire = Output(Bool())
+    val outerAcquireInfo = Output(new OuterAcquireInfo)
   })
 
   // ready must be a register, because we derive valid from ready
@@ -54,7 +54,8 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     SynthesizePrintf(printf("SourceA throttling\n"))
   }
 
-  io.outerAcquireFire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
+  io.outerAcquireInfo.didFireAcquire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
+  io.outerAcquireInfo.dramBank := (a.bits.address >> 13.U) & 7.U // magic numbers are 8KB rows and 8 banks
 
   io.req.ready := a.ready
   a.valid := io.req.valid

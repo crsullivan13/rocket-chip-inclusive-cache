@@ -29,6 +29,11 @@ import freechips.rocketchip.tilelink._
 
 import midas.targetutils.SynthesizePrintf
 
+class OuterAcquireInfo() extends Bundle {
+  val dramBank = UInt(3.W)
+  val didFireAcquire = Bool()
+}
+
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
@@ -169,7 +174,7 @@ class InclusiveCache(
 
     val enGlobal = RegInit(0.B)
 
-    val outerAcquireCount = Reg(UInt(25.W))
+    val outerAcquireCount = Reg(Vec(8,UInt(25.W)))
     val acquireBudget = Reg(UInt(25.W))
     //acquireBudget := 2.U
 
@@ -186,26 +191,33 @@ class InclusiveCache(
       printf("Reset\n")
     }
 
-    val tmp = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, Bool()))
+    val bankAcquires = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, Bool()))
+    val acquireDRAMBank = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, UInt(3.W)))
 
     var bank = 0
     val activeBanks = mods.map( sched => {
-      val doesBankFireAcquire = sched.io.outerAcquireFire
-      tmp(bank.U) := doesBankFireAcquire
+      val doesBankFireAcquire = sched.io.outerAcquireInfo.didFireAcquire
+      val dramBank = sched.io.OuterAcquireInfo.dramBank
+      bankAcquires(bank.U) := doesBankFireAcquire
+      acquireDRAMBank(bank.U) := dramBank
 
       when ( doesBankFireAcquire ) {
         SynthesizePrintf(printf("%d: Bank %d fired acquire\n", periodCount, bank.U))
       }
       bank = bank+1
 
-      sched.io.throttle := (outerAcquireCount >= acquireBudget) && enGlobal
+      sched.io.throttle := (outerAcquireCount(dramBank) >= acquireBudget) && enGlobal
 
       doesBankFireAcquire
     })
 
-    outerAcquireCount := Mux(periodReset || !enGlobal, 0.U + activeBanks.reduce(_||_), activeBanks.reduce(_||_) + outerAcquireCount)
+    for ( i <- 0 until 8 ) {
+      val isThisDramBank = activeBanks.reduce(_||_) && acquireDRAMBank.map( bank => bank === i.U)
+      outerAcquireCount(i.U) := Mux(periodReset || !enGlobal, 0.U + isThisDramBank, isThisDramBank + outerAcquireCount(i.U))
+    }
+
     when ( activeBanks.reduce(_||_) ) {
-      SynthesizePrintf(printf("Active banks %x\n", PopCount(tmp)))
+      SynthesizePrintf(printf("Active banks %x\n", PopCount(bankAcquires)))
     }
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
