@@ -93,7 +93,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val sinke     = Flipped(Valid(new SinkEResponse(params)))
     val nestedwb  = Flipped(new NestedWriteback(params))
 
-    val throttle = Input(Bool())
+    val throttle = Input(Vec(4, Bool()))
   })
 
   val request_valid = RegInit(false.B)
@@ -193,7 +193,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.reload := no_wait
   io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
-                       io.schedule.bits.dir.valid) && !io.throttle
+                       io.schedule.bits.dir.valid) && !(io.throttle(io.schedule.bits.a.bits.domainId)) // io.schedule.bits.a.bits.domainId when setup
 
   // Schedule completions
   when (io.schedule.ready) {
@@ -285,6 +285,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.a.bits.block   := request.size =/= log2Ceil(params.cache.blockBytes).U ||
                                      !(request.opcode === PutFullData || request.opcode === AcquirePerm)
   io.schedule.bits.a.bits.source  := 0.U
+  io.schedule.bits.a.bits.domainId := request.domainId
   io.schedule.bits.b.bits.param   := Mux(!s_rprobe, toN, Mux(request.prio(1), request.param, Mux(req_needT, toN, toB)))
   io.schedule.bits.b.bits.tag     := Mux(!s_rprobe, meta.tag, request.tag)
   io.schedule.bits.b.bits.set     := request.set
@@ -535,6 +536,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     assert (!request_valid || (no_wait && io.schedule.fire))
     request_valid := true.B
     request := io.allocate.bits
+    request.domainId := Mux(io.allocate.bits.opcode === TLMessages.AcquireBlock || io.allocate.bits.opcode === TLMessages.AcquirePerm,
+                          io.allocate.bits.domainId, request.domainId)
   }
 
   // Create execution plan

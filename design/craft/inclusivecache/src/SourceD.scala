@@ -259,6 +259,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module
   atomics.io.write     := s4_req.prio(2)
   atomics.io.a.opcode  := s4_adjusted_opcode
   atomics.io.a.param   := s4_req.param
+  atomics.io.a.domainId := 0.U
   atomics.io.a.size    := 0.U
   atomics.io.a.source  := 0.U
   atomics.io.a.address := 0.U

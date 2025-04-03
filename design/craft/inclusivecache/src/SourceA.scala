@@ -30,6 +30,8 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val param  = UInt(3.W)
   val source = UInt(params.outer.bundle.sourceBits.W)
   val block  = Bool()
+
+  val domainId = UInt(2.W)
 }
 
 class SourceA(params: InclusiveCacheParameters) extends Module
@@ -37,8 +39,8 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
-    val throttle = Input(Bool())
-    val outerAcquireFire = Output(Bool())
+    val throttle = Input(Vec(4, Bool()))
+    val outerAcquireInfo = Output(new OuterAcquireInfo())
   })
 
   // ready must be a register, because we derive valid from ready
@@ -50,11 +52,12 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   buffer.ready := io.a.ready //&& !(io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock)
   io.a.valid := buffer.valid //&& !(io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock)
 
-  when ( io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock ) {
+  when ( io.throttle(io.a.bits.domainId) && buffer.bits.opcode === TLMessages.AcquireBlock ) {
     SynthesizePrintf(printf("SourceA throttling\n"))
   }
 
-  io.outerAcquireFire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
+  io.outerAcquireInfo.didFireAcquire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
+  io.outerAcquireInfo.regulationDomain := a.bits.domainId // when setup
 
   io.req.ready := a.ready
   a.valid := io.req.valid
@@ -68,4 +71,5 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
   a.bits.data    := 0.U
   a.bits.corrupt := false.B
+  a.bits.domainId := io.req.bits.domainId
 }

@@ -29,6 +29,11 @@ import freechips.rocketchip.tilelink._
 
 import midas.targetutils.SynthesizePrintf
 
+class OuterAcquireInfo() extends Bundle {
+  val regulationDomain = UInt(2.W)
+  val didFireAcquire = Bool()
+}
+
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
@@ -167,9 +172,11 @@ class InclusiveCache(
       scheduler
     }
 
+    val nDomains = 4
+
     val enGlobal = RegInit(0.B)
 
-    val outerAcquireCount = Reg(UInt(25.W))
+    val outerAcquireCount = RegInit(VecInit(Seq.fill(nDomains)(0.U(25.W))))
     val acquireBudget = Reg(UInt(25.W))
     //acquireBudget := 2.U
 
@@ -179,33 +186,37 @@ class InclusiveCache(
 
     //periodLength := 200.U
 
-    periodReset := periodCount >= periodLength
+    periodReset := periodCount >= (periodLength)
     periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
 
     when ( periodReset ) {
       printf("Reset\n")
     }
 
-    val tmp = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, Bool()))
-
     var bank = 0
-    val activeBanks = mods.map( sched => {
-      val doesBankFireAcquire = sched.io.outerAcquireFire
-      tmp(bank.U) := doesBankFireAcquire
+    val activeDomains = mods.map( sched => {
+      val didBankFireAcquire = sched.io.outerAcquireInfo.didFireAcquire
+      val firedDomainId = WireDefault(nDomains.U)
 
-      when ( doesBankFireAcquire ) {
+      when ( didBankFireAcquire ) {
         SynthesizePrintf(printf("%d: Bank %d fired acquire\n", periodCount, bank.U))
+        firedDomainId := sched.io.outerAcquireInfo.regulationDomain
       }
       bank = bank+1
 
-      sched.io.throttle := (outerAcquireCount >= acquireBudget) && enGlobal
-
-      doesBankFireAcquire
+      firedDomainId
     })
 
-    outerAcquireCount := Mux(periodReset || !enGlobal, 0.U + activeBanks.reduce(_||_), activeBanks.reduce(_||_) + outerAcquireCount)
-    when ( activeBanks.reduce(_||_) ) {
-      SynthesizePrintf(printf("Active banks %x\n", PopCount(tmp)))
+    for ( i <- 0 until nDomains ) {
+      val didDomainFire = activeDomains.map( id => id === i.U ).reduce(_||_)
+
+      outerAcquireCount(i.U) := Mux(periodReset || !enGlobal, 0.U + didDomainFire, didDomainFire + outerAcquireCount(i.U))
+
+      mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireCount(i.U) >= acquireBudget) && enGlobal )
+
+      when ( didDomainFire ) {
+        SynthesizePrintf(printf("Active domain %x\n", i.U))
+      }
     }
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
