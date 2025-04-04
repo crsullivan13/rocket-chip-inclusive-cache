@@ -27,6 +27,8 @@ import MetaData._
 import chisel3.PrintableHelper
 import chisel3.experimental.dataview._
 
+import midas.targetutils.SynthesizePrintf
+
 class ScheduleRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val a = Valid(new SourceARequest(params))
@@ -93,7 +95,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val sinke     = Flipped(Valid(new SinkEResponse(params)))
     val nestedwb  = Flipped(new NestedWriteback(params))
 
-    val throttle = Input(Bool())
+    val throttle = Input(new ThrottleBundle())
   })
 
   val request_valid = RegInit(false.B)
@@ -181,6 +183,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   assert (!io.status.bits.nestB || !io.status.bits.blockB)
   assert (!io.status.bits.nestC || !io.status.bits.blockC)
 
+  val should_throttle = io.throttle.regulationDomain(io.schedule.bits.a.bits.domainId) &&
+                        io.throttle.dramBank((params.expandAddress(io.schedule.bits.a.bits.tag, io.schedule.bits.a.bits.set, 0.U) >> 13.U) & 7.U)
   // Scheduler requests
   val no_wait = w_rprobeacklast && w_releaseack && w_grantlast && w_pprobeacklast && w_grantack
   io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe
@@ -191,9 +195,13 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.x.valid := !s_flush && w_releaseack
   io.schedule.bits.dir.valid := (!s_release && w_rprobeackfirst) || (!s_writeback && no_wait)
   io.schedule.bits.reload := no_wait
-  io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
+  io.schedule.valid := ( io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
-                       io.schedule.bits.dir.valid) && !io.throttle
+                       io.schedule.bits.dir.valid ) && !( should_throttle )
+
+  when ( should_throttle ) {
+    SynthesizePrintf(printf("Throttling MSHR\n"))
+  }
 
   // Schedule completions
   when (io.schedule.ready) {
@@ -285,6 +293,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.a.bits.block   := request.size =/= log2Ceil(params.cache.blockBytes).U ||
                                      !(request.opcode === PutFullData || request.opcode === AcquirePerm)
   io.schedule.bits.a.bits.source  := 0.U
+  io.schedule.bits.a.bits.domainId := request.domainId
   io.schedule.bits.b.bits.param   := Mux(!s_rprobe, toN, Mux(request.prio(1), request.param, Mux(req_needT, toN, toB)))
   io.schedule.bits.b.bits.tag     := Mux(!s_rprobe, meta.tag, request.tag)
   io.schedule.bits.b.bits.set     := request.set
@@ -535,6 +544,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     assert (!request_valid || (no_wait && io.schedule.fire))
     request_valid := true.B
     request := io.allocate.bits
+    request.domainId := Mux(io.allocate.bits.opcode === TLMessages.AcquireBlock || io.allocate.bits.opcode === TLMessages.AcquirePerm,
+                          io.allocate.bits.domainId, request.domainId)
   }
 
   // Create execution plan
