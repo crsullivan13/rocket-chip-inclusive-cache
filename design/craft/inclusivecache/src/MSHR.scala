@@ -27,6 +27,8 @@ import MetaData._
 import chisel3.PrintableHelper
 import chisel3.experimental.dataview._
 
+import midas.targetutils.SynthesizePrintf
+
 class ScheduleRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val a = Valid(new SourceARequest(params))
@@ -194,6 +196,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
                        io.schedule.bits.dir.valid) && !(io.throttle(io.schedule.bits.a.bits.domainId)) // io.schedule.bits.a.bits.domainId when setup
+
+  when ( io.throttle(io.schedule.bits.a.bits.domainId) ) {
+    SynthesizePrintf(printf("MSHR throttling\n"))
+  }
 
   // Schedule completions
   when (io.schedule.ready) {

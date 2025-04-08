@@ -52,9 +52,9 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   buffer.ready := io.a.ready //&& !(io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock)
   io.a.valid := buffer.valid //&& !(io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock)
 
-  when ( io.throttle(io.a.bits.domainId) && buffer.bits.opcode === TLMessages.AcquireBlock ) {
-    SynthesizePrintf(printf("SourceA throttling\n"))
-  }
+  // when ( io.throttle(a.bits.domainId) && buffer.bits.opcode === TLMessages.AcquireBlock ) {
+  //   SynthesizePrintf(printf("SourceA throttling\n"))
+  // }
 
   io.outerAcquireInfo.didFireAcquire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
   io.outerAcquireInfo.regulationDomain := a.bits.domainId // when setup

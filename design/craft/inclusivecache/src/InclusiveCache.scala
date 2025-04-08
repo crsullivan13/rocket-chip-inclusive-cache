@@ -176,7 +176,7 @@ class InclusiveCache(
 
     val enGlobal = RegInit(0.B)
 
-    val outerAcquireCount = RegInit(VecInit(Seq.fill(nDomains)(0.U(25.W))))
+    val outerAcquireCount = Reg(Vec(nDomains, UInt(25.W)))
     val acquireBudget = Reg(UInt(25.W))
     //acquireBudget := 2.U
 
@@ -186,7 +186,7 @@ class InclusiveCache(
 
     //periodLength := 200.U
 
-    periodReset := periodCount >= (periodLength)
+    periodReset := periodCount >= periodLength
     periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
 
     when ( periodReset ) {
