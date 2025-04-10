@@ -177,7 +177,7 @@ class InclusiveCache(
     val enGlobal = RegInit(0.B)
 
     val outerAcquireCount = Reg(Vec(nDomains, UInt(25.W)))
-    val acquireBudget = Reg(UInt(25.W))
+    val acquireBudget = Reg(Vec(4,UInt(25.W)))
     //acquireBudget := 2.U
 
     val periodCount = RegInit(0.U(25.W))
@@ -212,7 +212,7 @@ class InclusiveCache(
 
       outerAcquireCount(i.U) := Mux(periodReset || !enGlobal, 0.U + didDomainFire, didDomainFire + outerAcquireCount(i.U))
 
-      mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireCount(i.U) >= acquireBudget) && enGlobal )
+      mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal )
 
       when ( didDomainFire ) {
         SynthesizePrintf(printf("Active domain %x\n", i.U))
@@ -223,12 +223,14 @@ class InclusiveCache(
 
     val periodLenRegField = RegField(periodLength.getWidth, periodLength, RegFieldDesc("periodLength", "Period length"))
 
-    val maxReadRegField = RegField(acquireBudget.getWidth, acquireBudget, RegFieldDesc("acquireBudget", "Read budget"))
+    val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(32, reg,
+        RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
+      //RegField(acquireBudget.getWidth, acquireBudget, RegFieldDesc("acquireBudget", "Read budget"))
 
     regnode.regmap(
       0x000 -> Seq(enGlobalField),
       0x008 -> Seq(periodLenRegField),
-      0x010 -> Seq(maxReadRegField),
+      0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
     )
 
     ctrls.foreach { ctrl =>
