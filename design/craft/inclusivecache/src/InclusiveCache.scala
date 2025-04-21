@@ -27,6 +27,8 @@ import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey}
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
+import freechips.rocketchip.tile._
+
 import midas.targetutils.SynthesizePrintf
 
 class OuterAcquireInfo() extends Bundle {
@@ -55,6 +57,8 @@ class InclusiveCache(
     address = Seq(AddressSet(0x21000000, 0x7ff)),
     device = regulationDevice,
     beatBytes = 8)
+
+  val dramRegNode = BundleBridgeSource(() => new BRUTileIO(4)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -214,10 +218,14 @@ class InclusiveCache(
 
       mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal )
 
-      when ( didDomainFire ) {
-        SynthesizePrintf(printf("Active domain %x\n", i.U))
-      }
+      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal
+
+      // when ( didDomainFire ) {
+      //   SynthesizePrintf(printf("Active domain %x\n", i.U))
+      // }
     }
+
+    //dramRegNode.bundle.nThrottle(0.U) := (outerAcquireCount(0.U) >= acquireBudget(0.U)) && enGlobal
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
 

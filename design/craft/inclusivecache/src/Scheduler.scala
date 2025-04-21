@@ -24,6 +24,8 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import chisel3.experimental.dataview._
 
+import midas.targetutils.SynthesizePrintf
+
 class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Module
 {
   val io = IO(new Bundle {
@@ -104,6 +106,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
 
   val stall_abc = (mshr_stall_abc zip abc_mshrs) map { case (s, m) => s && m.io.status.valid }
+  when ( stall_abc.reduce(_||_) ) {
+    SynthesizePrintf(printf("ABC MSHR pre-empted\n"))
+  }
   if (!params.lastLevel || !params.firstLevel)
     params.ccover(stall_abc.reduce(_||_), "SCHEDULER_ABC_INTERLOCK", "ABC MSHR interlocked due to pre-emption")
   if (!params.lastLevel)

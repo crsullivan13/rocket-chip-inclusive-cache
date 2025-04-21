@@ -147,6 +147,8 @@ class WithInclusiveCache(
         l2.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
+    sbus.BwRegulator.get.dramRegNode := l2.dramRegNode
+
     ElaborationArtefacts.add("l2.json", l2.module.json)
     (filter.node, lastLevelNode, None)
   })
