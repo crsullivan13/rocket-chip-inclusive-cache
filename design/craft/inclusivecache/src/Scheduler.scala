@@ -123,7 +123,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
       (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
-      (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
+      (directory.io.write.ready || !m.io.schedule.bits.dir.valid) &&
+      !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId) && m.io.schedule.bits.a.bits.block)
   }.reverse)
 
   // Round-robin arbitration of MSHRs
