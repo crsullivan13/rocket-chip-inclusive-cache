@@ -26,6 +26,8 @@ import MetaData._
 import chisel3.experimental.dataview._
 import freechips.rocketchip.util.DescribedSRAM
 
+import freechips.rocketchip.util.{rightOR}
+
 class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val dirty   = Bool() // true => TRUNK or TIP
@@ -113,12 +115,22 @@ class Directory(params: InclusiveCacheParameters) extends Module
 
   // Compute the victim way in case of an evicition
   val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
-  val victimSums = Seq.tabulate(params.cache.ways) { i => ((1 << InclusiveCacheParameters.lfsrBits)*i / params.cache.ways).U }
-  val victimLTE  = Cat(victimSums.map { _ <= victimLFSR }.reverse)
-  val victimSimp = Cat(0.U(1.W), victimLTE(params.cache.ways-1, 1), 1.U(1.W))
-  val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1)
+  val victimSums = VecInit(Seq(2,2,4,8,16).map { nWays => // generate ROMs for each partition size, assume 16 ways for now, extra ROM due to lint issue
+    val base = Seq.tabulate(nWays) { j => ((1 << InclusiveCacheParameters.lfsrBits)*j / nWays).U }
+    VecInit(base ++ Seq.fill(params.cache.ways - nWays)(0.U))
+  })
+  val enabledWays = PopCount("b1111111100000000".U) // hardcoded masks for now
+  val victimSumRangeIndex = Log2(enabledWays)
+  val lowestSetMaskBit = PriorityEncoder("b1111111100000000".U)
+  val victimLTE  = Cat(victimSums(victimSumRangeIndex).map { _ <= victimLFSR }.reverse) << lowestSetMaskBit
+  val wayPart = rightOR((victimLTE & "b1111111100000000".U) | 1.U << lowestSetMaskBit) // rightOR to keep monotone property
+  val victimSimp = Cat(0.U(1.W), wayPart(params.cache.ways-1, 0))
+  val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1) // select highest set bit
   val victimWay = OHToUInt(victimWayOH)
-  assert (!ren2 || victimLTE(0) === 1.U)
+  when ( io.result.valid ) {
+    printf("Selected victim way %d\n", victimWay)
+  }
+  //assert (!ren2 || victimLTE(0) === 1.U)
   assert (!ren2 || ((victimSimp >> 1) & ~victimSimp) === 0.U) // monotone
   assert (!ren2 || PopCount(victimWayOH) === 1.U)
 
