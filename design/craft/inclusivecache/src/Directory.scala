@@ -47,6 +47,7 @@ class DirectoryRead(params: InclusiveCacheParameters) extends InclusiveCacheBund
 {
   val set = UInt(params.setBits.W)
   val tag = UInt(params.tagBits.W)
+  val wayMask = UInt(16.W)
 }
 
 class DirectoryResult(params: InclusiveCacheParameters) extends DirectoryEntry(params)
@@ -119,11 +120,11 @@ class Directory(params: InclusiveCacheParameters) extends Module
     val base = Seq.tabulate(nWays) { j => ((1 << InclusiveCacheParameters.lfsrBits)*j / nWays).U }
     VecInit(base ++ Seq.fill(params.cache.ways - nWays)(0.U))
   })
-  val enabledWays = PopCount("b1111111100000000".U) // hardcoded masks for now
+  val enabledWays = PopCount(io.read.bits.wayMask) // hardcoded masks for now
   val victimSumRangeIndex = Log2(enabledWays)
-  val lowestSetMaskBit = PriorityEncoder("b1111111100000000".U)
+  val lowestSetMaskBit = PriorityEncoder(io.read.bits.wayMask)
   val victimLTE  = Cat(victimSums(victimSumRangeIndex).map { _ <= victimLFSR }.reverse) << lowestSetMaskBit
-  val wayPart = rightOR((victimLTE & "b1111111100000000".U) | 1.U << lowestSetMaskBit) // rightOR to keep monotone property
+  val wayPart = rightOR((victimLTE & io.read.bits.wayMask) | 1.U << lowestSetMaskBit) // rightOR to keep monotone property
   val victimSimp = Cat(0.U(1.W), wayPart(params.cache.ways-1, 0))
   val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1) // select highest set bit
   val victimWay = OHToUInt(victimWayOH)

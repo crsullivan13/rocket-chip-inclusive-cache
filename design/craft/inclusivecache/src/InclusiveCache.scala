@@ -184,6 +184,8 @@ class InclusiveCache(
     val acquireBudget = Reg(Vec(4,UInt(25.W)))
     //acquireBudget := 2.U
 
+    val wayMask = RegInit(VecInit(Seq.fill(4)("b1111111111111111".U)))
+
     val periodCount = RegInit(0.U(25.W))
     val periodLength = Reg(UInt(25.W))
     val periodReset = Wire(Bool())
@@ -235,10 +237,14 @@ class InclusiveCache(
         RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
       //RegField(acquireBudget.getWidth, acquireBudget, RegFieldDesc("acquireBudget", "Read budget"))
 
+    val wayMaskRegField = wayMask.zipWithIndex.map { case (reg, i) => RegField(reg.getWidth, reg,
+        RegFieldDesc(s"wayPartMask$i", s"Way partition mask for domain $i")) }
+
     regnode.regmap(
       0x000 -> Seq(enGlobalField),
       0x008 -> Seq(periodLenRegField),
       0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
+      0x040 -> RegFieldGroup("WayMask", Some("Per-domain way partition mask"), wayMaskRegField)
     )
 
     ctrls.foreach { ctrl =>
@@ -246,6 +252,10 @@ class InclusiveCache(
       ctrl.module.io.flush_resp := false.B
       ctrl.module.io.flush_match := false.B
     }
+
+    mods.foreach ( bank => {
+      bank.io.wayMasks := wayMask
+    } )
 
     mods.zip(node.edges.in).zipWithIndex.foreach { case ((sched, edgeIn), i) =>
       val ctrl = if (ctrls.size > 1) Some(ctrls(i)) else ctrls.headOption

@@ -38,6 +38,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     val req = Flipped(Decoupled(new SinkXRequest(params)))
     val resp = Decoupled(new SourceXRequest(params))
 
+    val wayMasks = Input(Vec(4, UInt(16.W)))
+
     val throttle = Input(Vec(4, Bool()))
     val outerAcquireInfo = Output(new OuterAcquireInfo())
   })
@@ -278,6 +280,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
   directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
+  directory.io.read.bits.wayMask := Mux(mshr_uses_directory_for_lb, io.wayMasks(requests.io.data.domainId), io.wayMasks(request.bits.domainId))
 
   // Enqueue the request if not bypassed directly into an MSHR
   requests.io.push.valid := request.valid && queue && !bypassQueue
