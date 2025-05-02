@@ -115,6 +115,10 @@ class Directory(params: InclusiveCacheParameters) extends Module
   val set = params.dirReg(RegEnable(io.read.bits.set, ren), ren1)
 
   // Compute the victim way in case of an evicition
+
+  // wire to hold way mask, mux if det bit set use way mask with request otherwise use all ways
+  // maybe modify the way mask based on the directory bits
+
   val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
   val victimSums = VecInit(Seq(2,4,8,16).map { nWays => // generate ROMs for each partition size, assume 16 ways for now
     val base = Seq.tabulate(nWays) { j => ((1 << InclusiveCacheParameters.lfsrBits)*j / nWays).U }
