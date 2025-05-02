@@ -116,12 +116,12 @@ class Directory(params: InclusiveCacheParameters) extends Module
 
   // Compute the victim way in case of an evicition
   val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
-  val victimSums = VecInit(Seq(2,2,4,8,16).map { nWays => // generate ROMs for each partition size, assume 16 ways for now, extra ROM due to lint issue
+  val victimSums = VecInit(Seq(2,4,8,16).map { nWays => // generate ROMs for each partition size, assume 16 ways for now
     val base = Seq.tabulate(nWays) { j => ((1 << InclusiveCacheParameters.lfsrBits)*j / nWays).U }
     VecInit(base ++ Seq.fill(params.cache.ways - nWays)(0.U))
   })
   val enabledWays = PopCount(io.read.bits.wayMask) // hardcoded masks for now
-  val victimSumRangeIndex = Log2(enabledWays)
+  val victimSumRangeIndex = MuxLookup(enabledWays, 3.U)(Seq(2.U -> 0.U, 4.U -> 1.U, 8.U -> 2.U, 16.U -> 3.U))
   val lowestSetMaskBit = PriorityEncoder(io.read.bits.wayMask)
   val victimLTE  = Cat(victimSums(victimSumRangeIndex).map { _ <= victimLFSR }.reverse) << lowestSetMaskBit
   val wayPart = rightOR((victimLTE & io.read.bits.wayMask) | 1.U << lowestSetMaskBit) // rightOR to keep monotone property
