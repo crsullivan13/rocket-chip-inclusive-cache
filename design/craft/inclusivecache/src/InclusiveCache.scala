@@ -203,7 +203,7 @@ class InclusiveCache(
       val firedDomainId = WireDefault(nDomains.U)
 
       when ( didBankFireAcquire ) {
-        SynthesizePrintf(printf("%d: Bank %d fired acquire\n", periodCount, bank.U))
+        //SynthesizePrintf(printf("%d: Bank %d fired acquire\n", periodCount, bank.U))
         firedDomainId := sched.io.outerAcquireInfo.regulationDomain
       }
       bank = bank+1

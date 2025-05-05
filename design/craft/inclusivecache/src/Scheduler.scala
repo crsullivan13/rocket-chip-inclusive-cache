@@ -106,8 +106,12 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
 
   val stall_abc = (mshr_stall_abc zip abc_mshrs) map { case (s, m) => s && m.io.status.valid }
-  when ( stall_abc.reduce(_||_) ) {
-    SynthesizePrintf(printf("ABC MSHR pre-empted\n"))
+  (stall_abc zip abc_mshrs).foreach { case (stall, abc_mshr) =>
+    when ( stall ) {
+      SynthesizePrintf(printf("ABC MSHR pre-empted, req from domain %d\n", abc_mshr.io.status.bits.domainId))
+      SynthesizePrintf(printf("BC MSHR req from domain %d, valid %d\n", bc_mshr.io.status.bits.domainId, bc_mshr.io.status.valid))
+      SynthesizePrintf(printf("C MSHR req from domain %d, valid %d\n", c_mshr.io.status.bits.domainId, c_mshr.io.status.valid))
+    }
   }
   if (!params.lastLevel || !params.firstLevel)
     params.ccover(stall_abc.reduce(_||_), "SCHEDULER_ABC_INTERLOCK", "ABC MSHR interlocked due to pre-emption")
@@ -124,7 +128,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
       (directory.io.write.ready || !m.io.schedule.bits.dir.valid) &&
-      !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId) && m.io.schedule.bits.a.bits.block)
+      !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId))
   }.reverse)
 
   // Round-robin arbitration of MSHRs
@@ -204,6 +208,14 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   if (!params.firstLevel) {
     params.ccover(request.valid && blockC, "SCHEDULER_BLOCKC", "Interlock C request while resolving set conflict")
     params.ccover(request.valid && nestC,  "SCHEDULER_NESTC", "Priority escalation from channel C")
+
+    when ( request.valid && blockC ) {
+      SynthesizePrintf(printf("Block C while resolving set conflict, domain %d, blocker %d\n",request.bits.domainId, Mux1H(setMatches, mshrs.map(_.io.status.bits.domainId))))
+    }
+
+    when ( request.valid && nestC ) {
+      SynthesizePrintf(printf("Priority escalation from channel C, domain %d, nester %d\n",request.bits.domainId, Mux1H(setMatches, mshrs.map(_.io.status.bits.domainId))))
+    }
   }
   params.ccover(request.valid && queue, "SCHEDULER_SECONDARY", "Enqueue secondary miss")
 
@@ -273,6 +285,11 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
      (nestC && !mshr_uses_directory_assuming_no_bypass && !c_mshr.io.status.valid)
   request.ready := request_alloc_cases || (queue && (bypassQueue || requests.io.push.ready))
   val alloc_uses_directory = request.valid && request_alloc_cases
+
+  when ( request.valid && !request.ready ) {
+    SynthesizePrintf(printf("Request not ready, alloc_cases %d, queue %d, bypassQueue %d, reqeusts push ready %d, domain %d\n",
+                              request_alloc_cases, queue, bypassQueue, requests.io.push.ready, request.bits.domainId))
+  }
 
   // When a request goes through, it will need to hit the Directory
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
