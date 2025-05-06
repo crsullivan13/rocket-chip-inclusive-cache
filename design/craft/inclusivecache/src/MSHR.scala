@@ -233,6 +233,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     final_meta_writeback.state   := Mux(request.param =/= TtoT && meta.state === TRUNK, TIP, meta.state)
     final_meta_writeback.clients := meta.clients & ~Mux(isToN(request.param), req_clientBit, 0.U)
     final_meta_writeback.hit     := true.B // chained requests are hits
+    final_meta_writeback.isDeterministic := request.isDeterministic
   } .elsewhen (request.control && params.control.B) { // request.prio(0)
     when (meta.hit) {
       final_meta_writeback.dirty   := false.B
@@ -240,6 +241,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       final_meta_writeback.clients := meta.clients & ~probes_toN
     }
     final_meta_writeback.hit := false.B
+    final_meta_writeback.isDeterministic := false.B
   } .otherwise {
     final_meta_writeback.dirty := (meta.hit && meta.dirty) || !request.opcode(2)
     final_meta_writeback.state := Mux(req_needT,
@@ -254,6 +256,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
                                     Mux(req_acquire, req_clientBit, 0.U)
     final_meta_writeback.tag := request.tag
     final_meta_writeback.hit := true.B
+    final_meta_writeback.isDeterministic := request.isDeterministic
   }
 
   when (bad_grant) {
@@ -264,12 +267,14 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       final_meta_writeback.dirty   := false.B
       final_meta_writeback.state   := BRANCH
       final_meta_writeback.clients := meta.clients & ~probes_toN
+      final_meta_writeback.isDeterministic := request.isDeterministic
     } .otherwise {
       // failed N -> (T or B)
       final_meta_writeback.hit     := false.B
       final_meta_writeback.dirty   := false.B
       final_meta_writeback.state   := INVALID
       final_meta_writeback.clients := 0.U
+      final_meta_writeback.isDeterministic := false.B
     }
   }
 
@@ -278,6 +283,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   invalid.state   := INVALID
   invalid.clients := 0.U
   invalid.tag     := 0.U
+  invalid.isDeterministic := false.B
 
   // Just because a client says BtoT, by the time we process the request he may be N.
   // Therefore, we must consult our own meta-data state to confirm he owns the line still.

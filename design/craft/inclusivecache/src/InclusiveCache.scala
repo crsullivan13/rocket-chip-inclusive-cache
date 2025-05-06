@@ -185,6 +185,7 @@ class InclusiveCache(
     //acquireBudget := 2.U
 
     val wayMask = RegInit(VecInit(Seq.fill(4)("b1111111111111111".U)))
+    wayMask(0.U) := "b1111111100000000".U
 
     val periodCount = RegInit(0.U(25.W))
     val periodLength = Reg(UInt(25.W))

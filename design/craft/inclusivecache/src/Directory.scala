@@ -34,6 +34,7 @@ class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val state   = UInt(params.stateBits.W)
   val clients = UInt(params.clientBits.W)
   val tag     = UInt(params.tagBits.W)
+  val isDeterministic = Bool()
 }
 
 class DirectoryWrite(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -48,6 +49,7 @@ class DirectoryRead(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val set = UInt(params.setBits.W)
   val tag = UInt(params.tagBits.W)
   val wayMask = UInt(16.W)
+  val isDeterministic = Bool()
 }
 
 class DirectoryResult(params: InclusiveCacheParameters) extends DirectoryEntry(params)
@@ -113,27 +115,36 @@ class Directory(params: InclusiveCacheParameters) extends Module
   val regout = params.dirReg(cc_dir.read(io.read.bits.set, ren), ren1)
   val tag = params.dirReg(RegEnable(io.read.bits.tag, ren), ren1)
   val set = params.dirReg(RegEnable(io.read.bits.set, ren), ren1)
+  val wayMask = params.dirReg(RegEnable(io.read.bits.wayMask, ren), ren1)
+  val isDeterministic = params.dirReg(RegEnable(io.read.bits.isDeterministic, ren), ren1)
 
   // Compute the victim way in case of an evicition
 
+  val detMemWays = Cat(regout.map(d => d.asTypeOf(new DirectoryEntry(params)).isDeterministic).reverse)
+
   // wire to hold way mask, mux if det bit set use way mask with request otherwise use all ways
-  // maybe modify the way mask based on the directory bits
+  val wayMaskComb = Wire(UInt(16.W))
+  val detMemPartCheck = ~detMemWays & wayMask
+  wayMaskComb := Mux(isDeterministic, Mux(detMemPartCheck.orR, detMemPartCheck, wayMask), "b1111111111111111".U & ~detMemWays) // hardcoded default for now, assume 16  ways
+  assert(wayMaskComb.orR)
 
   val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
   val victimSums = VecInit(Seq(2,4,8,16).map { nWays => // generate ROMs for each partition size, assume 16 ways for now
     val base = Seq.tabulate(nWays) { j => ((1 << InclusiveCacheParameters.lfsrBits)*j / nWays).U }
     VecInit(base ++ Seq.fill(params.cache.ways - nWays)(0.U))
   })
-  val enabledWays = PopCount(io.read.bits.wayMask) // hardcoded masks for now
+  val enabledWays = PopCount(wayMaskComb)
   val victimSumRangeIndex = MuxLookup(enabledWays, 3.U)(Seq(2.U -> 0.U, 4.U -> 1.U, 8.U -> 2.U, 16.U -> 3.U))
-  val lowestSetMaskBit = PriorityEncoder(io.read.bits.wayMask)
+  val lowestSetMaskBit = PriorityEncoder(wayMaskComb)
   val victimLTE  = Cat(victimSums(victimSumRangeIndex).map { _ <= victimLFSR }.reverse) << lowestSetMaskBit
-  val wayPart = rightOR((victimLTE & io.read.bits.wayMask) | 1.U << lowestSetMaskBit) // rightOR to keep monotone property
+  val wayPart = rightOR((victimLTE & wayMaskComb) | 1.U << lowestSetMaskBit) // rightOR to keep monotone property
   val victimSimp = Cat(0.U(1.W), wayPart(params.cache.ways-1, 0))
   val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1) // select highest set bit
   val victimWay = OHToUInt(victimWayOH)
   when ( io.result.valid ) {
     printf("Selected victim way %d\n", victimWay)
+    printf("isDeterministic %d, detMemWays %x\n", isDeterministic, detMemWays)
+    printf("Mask %x, detMemPart %x\n", wayMaskComb, detMemPartCheck)
   }
   //assert (!ren2 || victimLTE(0) === 1.U)
   assert (!ren2 || ((victimSimp >> 1) & ~victimSimp) === 0.U) // monotone

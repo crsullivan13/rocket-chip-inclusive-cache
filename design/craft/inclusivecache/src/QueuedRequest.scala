@@ -31,6 +31,7 @@ class QueuedRequest(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val offset = UInt(params.offsetBits.W)
   val put    = UInt(params.putBits.W)
   val domainId = UInt(2.W)
+  val isDeterministic = Bool()
 }
 
 class FullRequest(params: InclusiveCacheParameters) extends QueuedRequest(params)

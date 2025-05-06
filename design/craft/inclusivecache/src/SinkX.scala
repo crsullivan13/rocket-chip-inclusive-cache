@@ -52,4 +52,5 @@ class SinkX(params: InclusiveCacheParameters) extends Module
   io.req.bits.tag    := tag
   io.req.bits.put    := 0.U
   io.req.bits.domainId := 0.U
+  io.req.bits.isDeterministic := false.B
 }
