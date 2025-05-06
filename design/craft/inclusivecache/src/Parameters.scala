@@ -33,7 +33,8 @@ case class CacheParameters(
   sets:        Int,
   blockBytes:  Int,
   beatBytes:   Int, // inner
-  hintsSkipProbe: Boolean)
+  hintsSkipProbe: Boolean,
+  numCPUs: Int)
 {
   require (ways > 0)
   require (sets > 0)

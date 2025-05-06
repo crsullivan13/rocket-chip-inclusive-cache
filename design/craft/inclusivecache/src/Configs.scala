@@ -30,6 +30,7 @@ import sifive.blocks.inclusivecache.InclusiveCacheParameters
 case class InclusiveCacheParams(
   ways: Int,
   sets: Int,
+  numCPUs: Int,
   writeBytes: Int, // backing store update granularity
   portFactor: Int, // numSubBanks = (widest TL port * portFactor) / writeBytes
   memCycles: Int,  // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
@@ -53,7 +54,8 @@ class WithInclusiveCache(
   subBankingFactor: Int = 4,
   hintsSkipProbe: Boolean = false,
   bankedControl: Boolean = false,
-  ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress)
+  ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress),
+  numCPUs: Int = 2
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
@@ -63,15 +65,18 @@ class WithInclusiveCache(
       portFactor = subBankingFactor,
       hintsSkipProbe = hintsSkipProbe,
       bankedControl = bankedControl,
-      ctrlAddr = ctrlAddr)
+      ctrlAddr = ctrlAddr,
+      numCPUs = numCPUs)
   case SubsystemBankedCoherenceKey => up(SubsystemBankedCoherenceKey, site).copy(coherenceManager = { context =>
     implicit val p = context.p
     val sbus = context.tlBusWrapperLocationMap(SBUS)
     val cbus = context.tlBusWrapperLocationMap.lift(CBUS).getOrElse(sbus)
     val pbus = context.tlBusWrapperLocationMap(PBUS)
+    val ibus = context.ibus
     val InclusiveCacheParams(
       ways,
       sets,
+      numCPUs,
       writeBytes,
       portFactor,
       memCycles,
@@ -95,6 +100,7 @@ class WithInclusiveCache(
         level = 2,
         ways = ways,
         sets = sets,
+        numCPUs = numCPUs,
         blockBytes = sbus.blockBytes,
         beatBytes = sbus.beatBytes,
         hintsSkipProbe = hintsSkipProbe),
@@ -147,6 +153,7 @@ class WithInclusiveCache(
         l2.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
+    ibus.fromSync := l2.intSrc
     sbus.BwRegulator.get.dramRegNode := l2.dramRegNode
 
     ElaborationArtefacts.add("l2.json", l2.module.json)
