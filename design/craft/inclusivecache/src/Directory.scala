@@ -128,13 +128,16 @@ class Directory(params: InclusiveCacheParameters) extends Module
   wayMaskComb := Mux(isDeterministic, Mux(detMemPartCheck.orR, detMemPartCheck, wayMask), "b1111111111111111".U & ~detMemWays) // hardcoded default for now, assume 16  ways
   assert(wayMaskComb.orR)
 
+  val width = InclusiveCacheParameters.lfsrBits
   val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
-  val victimSums = VecInit(Seq(2,4,8,16).map { nWays => // generate ROMs for each partition size, assume 16 ways for now
-    val base = Seq.tabulate(nWays) { j => ((1 << InclusiveCacheParameters.lfsrBits)*j / nWays).U }
-    VecInit(base ++ Seq.fill(params.cache.ways - nWays)(0.U))
+  val victimSums = VecInit(Seq(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16).map { nWays => // generate ROMs for each partition size, assume 16 ways for now
+    val base = Seq.tabulate(nWays) { j => ((1 << width)*j / nWays).U(width.W) }
+    VecInit(base ++ Seq.fill(params.cache.ways - nWays)(1023.U(width.W)))
   })
   val enabledWays = PopCount(wayMaskComb)
-  val victimSumRangeIndex = MuxLookup(enabledWays, 3.U)(Seq(2.U -> 0.U, 4.U -> 1.U, 8.U -> 2.U, 16.U -> 3.U))
+  val victimSumRangeIndex = MuxLookup(enabledWays, 15.U)(Seq(1.U -> 0.U, 2.U -> 1.U, 3.U -> 2.U, 4.U -> 3.U, 5.U -> 4.U,
+                                                            6.U -> 5.U, 7.U -> 6.U, 8.U -> 7.U, 9.U -> 8.U, 10.U -> 9.U,
+                                                            11.U -> 10.U, 12.U -> 11.U, 13.U -> 12.U, 14.U -> 13.U, 15.U -> 14.U, 16.U -> 15.U))
   val lowestSetMaskBit = PriorityEncoder(wayMaskComb)
   val victimLTE  = Cat(victimSums(victimSumRangeIndex).map { _ <= victimLFSR }.reverse) << lowestSetMaskBit
   val wayPart = rightOR((victimLTE & wayMaskComb) | 1.U << lowestSetMaskBit) // rightOR to keep monotone property
