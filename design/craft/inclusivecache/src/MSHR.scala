@@ -299,6 +299,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.c.bits.opcode  := Mux(meta.dirty, ReleaseData, Release)
   io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, TtoN)
   io.schedule.bits.c.bits.source  := 0.U
+  io.schedule.bits.c.bits.domainId := request.domainId
   io.schedule.bits.c.bits.tag     := meta.tag
   io.schedule.bits.c.bits.set     := request.set
   io.schedule.bits.c.bits.way     := meta.way
@@ -542,8 +543,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     assert (!request_valid || (no_wait && io.schedule.fire))
     request_valid := true.B
     request := io.allocate.bits
-    request.domainId := Mux(io.allocate.bits.opcode === TLMessages.AcquireBlock || io.allocate.bits.opcode === TLMessages.AcquirePerm,
-                          io.allocate.bits.domainId, request.domainId)
+    request.domainId := io.allocate.bits.domainId
   }
 
   // Create execution plan

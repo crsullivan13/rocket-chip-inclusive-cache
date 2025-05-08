@@ -65,8 +65,6 @@ class InclusiveCache(
 
   val dramRegNode = BundleBridgeSource(() => new BRUTileIO(4)) // TODO make number of domains one parameter everywhere
 
-  val intSrc = IntSourceNode(IntSourcePortSimple(num = cache.numCPUs, resources = device.int))
-
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
 
@@ -98,6 +96,8 @@ class InclusiveCache(
       Description(name, mapping ++ extra ++ nextlevel)
     }
   }
+
+  val intSrc = IntSourceNode(IntSourcePortSimple(num = cache.numCPUs, resources = device.int))
 
   val node: TLAdapterNode = TLAdapterNode(
     clientFn  = { _ => TLClientPortParameters(Seq(TLClientParameters(
