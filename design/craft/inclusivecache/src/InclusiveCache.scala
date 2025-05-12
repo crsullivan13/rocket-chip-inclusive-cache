@@ -36,6 +36,11 @@ class OuterAcquireInfo() extends Bundle {
   val didFireAcquire = Bool()
 }
 
+// class OuterReleaseInfo() extends Bundle {
+//   val regulationDomain = UInt(2.W)
+//   val didFireRelease = Bool()
+// }
+
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
@@ -199,12 +204,16 @@ class InclusiveCache(
 
     var bank = 0
     val activeDomains = mods.map( sched => {
-      val didBankFireAcquire = sched.io.outerAcquireInfo.didFireAcquire
+      // val didBankFireAcquire = sched.io.outerAcquireInfo.didFireAcquire
+      val didBankFireAcquire = sched.io.out.a.fire
+      val didBankFireRelease = node.out(0)._2.last(sched.io.out.c) && sched.io.out.c.bits.opcode === TLMessages.ReleaseData
       val firedDomainId = WireDefault(nDomains.U)
 
       when ( didBankFireAcquire ) {
         //SynthesizePrintf(printf("%d: Bank %d fired acquire\n", periodCount, bank.U))
-        firedDomainId := sched.io.outerAcquireInfo.regulationDomain
+        firedDomainId := sched.io.out.a.bits.domainId
+      } .elsewhen ( didBankFireRelease ) {
+        firedDomainId := sched.io.out.c.bits.domainId
       }
       bank = bank+1
 

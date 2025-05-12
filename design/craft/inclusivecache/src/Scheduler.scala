@@ -119,16 +119,25 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
   // Consider scheduling an MSHR only if all the resources it requires are available
-  val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) =>
-    m.io.schedule.valid && !s &&
-      (sourceA.io.req.ready || !m.io.schedule.bits.a.valid) &&
-      (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
-      (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
-      (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
-      (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
-      (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
-      (directory.io.write.ready || !m.io.schedule.bits.dir.valid) &&
-      !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId))
+  val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) => {
+      val base = m.io.schedule.valid && !s &&
+        (sourceA.io.req.ready || !m.io.schedule.bits.a.valid) &&
+        (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
+        (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
+        (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
+        (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
+        (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
+        (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
+        
+      val noThrottle = if ( m != bc_mshr && m != c_mshr ) { 
+          !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId)) && 
+          !(m.io.schedule.bits.c.valid && io.throttle(m.io.schedule.bits.c.bits.domainId) && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)
+        } else { 
+          true.B 
+        }
+
+      base && noThrottle
+    }
   }.reverse)
 
   // Round-robin arbitration of MSHRs
