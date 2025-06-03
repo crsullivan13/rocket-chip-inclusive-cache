@@ -71,8 +71,8 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     domainReadys(i) := a.ready
 
     arb.io.in(i) <> buffer
-    buffer.ready := arb.io.in(i).ready && !(io.throttle(i) && buffer.bits.opcode === TLMessages.AcquireBlock)
-    arb.io.in(i).valid := buffer.valid && !(io.throttle(i) && buffer.bits.opcode === TLMessages.AcquireBlock)
+    buffer.ready := arb.io.in(i).ready && !(io.throttle(i))
+    arb.io.in(i).valid := buffer.valid && !(io.throttle(i))
 
     a.valid := io.req.valid && io.req.bits.domainId === i.U
     params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")

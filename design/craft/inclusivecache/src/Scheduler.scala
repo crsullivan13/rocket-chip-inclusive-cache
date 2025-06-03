@@ -40,6 +40,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
     val throttle = Input(Vec(4, Bool()))
     val outerAcquireInfo = Output(new OuterAcquireInfo())
+
+    val perfEnable = Input(Bool())
+    val perfEvents = Output(new PerfEvents())
   })
 
   val sourceA = Module(new SourceA(params))
@@ -53,6 +56,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   sourceA.io.throttle := io.throttle
   io.outerAcquireInfo := sourceA.io.outerAcquireInfo
   io.out.c <> sourceC.io.c
+  //sourceC.io.throttle := io.throttle
   io.out.e <> sourceE.io.e
   io.in.b <> sourceB.io.b
   io.in.d <> sourceD.io.d
@@ -65,7 +69,11 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val sinkX = Module(new SinkX(params))
 
   sinkA.io.a <> io.in.a
+  sinkA.io.perfEnable := io.perfEnable
+  io.perfEvents.sinkAStall := sinkA.io.perfStall
   sinkC.io.c <> io.in.c
+  sinkC.io.perfEnable := io.perfEnable
+  io.perfEvents.sinkCStall := sinkC.io.perfStall
   sinkE.io.e <> io.in.e
   sinkD.io.d <> io.out.d
   sinkX.io.x <> io.req
@@ -129,12 +137,13 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
         (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
         (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
         
-      val noThrottle = if ( m != bc_mshr && m != c_mshr ) { 
-          !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId)) && 
-          !(m.io.schedule.bits.c.valid && io.throttle(m.io.schedule.bits.c.bits.domainId) && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)
-        } else { 
-          true.B 
-        }
+      // val noThrottle = if ( m != bc_mshr && m != c_mshr ) { 
+      //     !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId)) && 
+      //     !(m.io.schedule.bits.c.valid && io.throttle(m.io.schedule.bits.c.bits.domainId) && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)
+      //   } else { 
+      //     true.B 
+      //   }
+      val noThrottle = !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId))
 
       base && noThrottle
     }
