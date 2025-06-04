@@ -59,7 +59,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
 
   val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle),4))
 
-  io.outerAcquireInfo.didFireAcquire := io.a.fire && io.a.bits.opcode === TLMessages.AcquireBlock
+  io.outerAcquireInfo.didFireAcquire := io.a.fire
   io.outerAcquireInfo.regulationDomain := io.a.bits.domainId // when setup
 
   for ( i <- 0 until 4 ) {
@@ -71,13 +71,13 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     domainReadys(i) := a.ready
 
     arb.io.in(i) <> buffer
-    buffer.ready := arb.io.in(i).ready && !(io.throttle(i) && buffer.bits.opcode === TLMessages.AcquireBlock)
-    arb.io.in(i).valid := buffer.valid && !(io.throttle(i) && buffer.bits.opcode === TLMessages.AcquireBlock)
+    buffer.ready := arb.io.in(i).ready && !(io.throttle(i))
+    arb.io.in(i).valid := buffer.valid && !(io.throttle(i))
 
     a.valid := io.req.valid && io.req.bits.domainId === i.U
     params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
     when ( a.valid && !a.ready ) {
-      SynthesizePrintf(printf("SourceA: Valid req, a not ready\n"))
+      SynthesizePrintf(printf("SourceA: Valid req, a not ready, domain %d\n", a.bits.domainId))
     }
 
     a.bits.domainId := io.req.bits.domainId
