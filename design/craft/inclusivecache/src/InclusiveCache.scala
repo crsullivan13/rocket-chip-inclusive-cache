@@ -284,7 +284,7 @@ class InclusiveCache(
       val outCIsWb =  in.c.bits.opcode === TLMessages.ReleaseData || in.c.bits.opcode === TLMessages.ProbeAckData
       val isMiss = (outaIsAcquire || (outaIsInstFetch && countInstFetch)) && scheduler.io.out.a.fire
       val isWbToDRAM = (outCIsWb && edgeOut.last(scheduler.io.out.c))
-      val toDRAM = (isMiss || isWbToDRAM)
+      val toDRAM = (isMiss)
       val isAccess = ((aIsWrite || aIsRead || (aIsInstFetch && countInstFetch)) && in.a.fire) || (cIsWb && in.c.fire) 
       when (!memguardPeriodCntrReset(outDomainID))
       {
@@ -429,7 +429,7 @@ class InclusiveCache(
       0x300 -> Seq(CountInstFetchReg),
       0x308 -> RegFieldGroup("CoreInterruptEnables", Some("Per-core interrupt enables"), EnableIntRegs),
       0x400 -> RegFieldGroup("CoreBudgets", Some("Per-core budgets"), CoreBudgetRegs),
-      0x500 -> RegFieldGroup("PeriodMemguard", Some("Memguard period lengths"), PeriodResetRegs)
+      0x500 -> RegFieldGroup("PeriodMemguard", Some("Memguard period lengths"), PeriodResetRegs),
       0x650 -> Seq(perfEnField),
       0x660 -> RegFieldGroup("LineRefill", Some("Per-domain line refill count"), lineRefillRegField),
       0x680 -> RegFieldGroup("WriteBack", Some("Per-domain writeback count"), writeBackRegField),
