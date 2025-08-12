@@ -27,6 +27,8 @@ import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey}
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
+import freechips.rocketchip.tile._
+
 import midas.targetutils.SynthesizePrintf
 
 class OuterAcquireInfo() extends Bundle {
@@ -39,6 +41,27 @@ class ThrottleBundle() extends Bundle {
   val regulationDomain = Vec(4,Bool())
   val dramBank = Vec(8,Bool())
 }
+
+class OuterAcquireInfo() extends Bundle {
+  val regulationDomain = UInt(2.W)
+  val didFireAcquire = Bool()
+}
+
+// TODO: Unify/remove these info bundles, i.e. make the code not bad
+class PerfEventInfo() extends Bundle {
+  val domainId = UInt(2.W)
+  val didEventOccur = Bool()
+}
+
+class PerfEvents() extends Bundle {
+  val sinkAStall = new PerfEventInfo()
+  val sinkCStall = new PerfEventInfo()
+}
+
+// class OuterReleaseInfo() extends Bundle {
+//   val regulationDomain = UInt(2.W)
+//   val didFireRelease = Bool()
+// }
 
 class InclusiveCache(
   val cache: CacheParameters,
@@ -61,6 +84,8 @@ class InclusiveCache(
     address = Seq(AddressSet(0x21000000, 0x7ff)),
     device = regulationDevice,
     beatBytes = 8)
+
+  val dramRegNode = BundleBridgeSource(() => new BRUTileIO(4)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -93,6 +118,8 @@ class InclusiveCache(
       Description(name, mapping ++ extra ++ nextlevel)
     }
   }
+
+  val intSrc = IntSourceNode(IntSourcePortSimple(num = cache.numCPUs, resources = device.int))
 
   val node: TLAdapterNode = TLAdapterNode(
     clientFn  = { _ => TLClientPortParameters(Seq(TLClientParameters(
@@ -128,6 +155,12 @@ class InclusiveCache(
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
+    // Memguard
+    val bundleParamsIn = node.in(0)._2.bundle
+    val bundleParamsOut = node.out(0)._2.bundle
+    val membase =  p(ExtMem).get.master.base
+    val nBanks = p(SubsystemBankedCoherenceKey).nBanks
+
     // If you have a control port, you must have at least one cache port
     require (ctrls.isEmpty || !node.edges.in.isEmpty)
 
@@ -144,8 +177,94 @@ class InclusiveCache(
       println("")
     }
 
+/*
+      Performance Counters that we added
+    */
+    val countInstFetch = RegInit(true.B)
+    val AccessCounterReset = RegInit(false.B)
+    val EnableInterrupt = Seq.fill(cache.numCPUs)(RegInit(false.B))
+ 
+    /*
+        Per-CacheBank counters
+    */
+    val PerBankMissCounters =  Seq.fill(nBanks)(RegInit(VecInit(Seq.fill(cache.numCPUs)(0.U(64.W)))))
+    val PerBankAccessCounters = Seq.fill(nBanks)(RegInit(VecInit(Seq.fill(cache.numCPUs)(0.U(64.W)))))
+ 
+    // Per-CPU counters
+    val MissCounters = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
+    val AccessCounters = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
+
+    // Per-CPU Regulation Budgets
+    val CoreBudgets = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
+
+    // only interrupt the core once per period
+    val hasInterrupted = Seq.fill(cache.numCPUs)(RegInit(false.B))
+    val coreDoInterrupt = Seq.fill(cache.numCPUs)(WireInit(false.B))
+
+    // val memguardPeriodCntr = Reg(UInt(25.W))
+    val memguardPeriodCntrReset = VecInit(Seq.fill(cache.numCPUs)(RegInit(false.B)))
+
+    for (j <- 0 until cache.numCPUs)
+    {
+      when (memguardPeriodCntrReset(j)) // Reset all
+      {
+          for (i <- 0 until nBanks)
+          {
+              PerBankAccessCounters(i)(j) := 0.U
+              PerBankMissCounters(i)(j) := 0.U
+          }
+
+          MissCounters(j) := 0.U
+          AccessCounters(j) := 0.U
+          hasInterrupted(j) := false.B
+
+      }
+      .otherwise // Calculate per core total accesses
+      {
+            val tmpSumMiss = VecInit(Seq.fill(nBanks)(0.U(64.W)))
+            val tmpSumAccess = VecInit(Seq.fill(nBanks)(0.U(64.W)))
+            tmpSumMiss(0) := PerBankMissCounters(0)(j)
+            tmpSumAccess(0) := PerBankAccessCounters(0)(j)
+            for (i <- 1 until nBanks)
+            {
+              tmpSumMiss(i) := PerBankMissCounters(i)(j) + tmpSumMiss(i-1)
+              tmpSumAccess(i) := PerBankAccessCounters(i)(j) + tmpSumAccess(i-1)
+            }
+
+            MissCounters(j) := tmpSumMiss(nBanks - 1)
+            AccessCounters(j) := tmpSumAccess(nBanks- 1)
+
+      }
+    }
+
+    /* 
+      Core will generate an interrupt if it is over budget and it is the first interrupt,
+      or if there is a new period and we must interrupt to let it get rid of the throttle task
+    */
+    println(s"CACHE COUNTER intSrc.out.size = ${intSrc.out.length}, intSrc.out(0).size = ${intSrc.out(0)._1.length}")
+    for (i <- 0 until cache.numCPUs)
+    {
+        val overBudget = MissCounters(i) >= CoreBudgets(i) && EnableInterrupt(i)        // we should take this out to do 1ms regulation
+        coreDoInterrupt(i) := (overBudget && EnableInterrupt(i) && !hasInterrupted(i)) //|| (hasInterrupted(i) && periodCntrReset)
+        when (!memguardPeriodCntrReset(i)) // do not drive signal twice
+        {
+          hasInterrupted(i) := coreDoInterrupt(i) || hasInterrupted(i)
+        } 
+        val (intOut, _) = intSrc.out(0) // does this need to be i as well? --> that causes an error
+        intOut(i) := coreDoInterrupt(i)
+
+    }
+    val perBankEvent = Wire(Vec(2, new PerfEventInfo()))
+    val nDomains = 4
+
+    val perfEnable = RegInit(false.B)
+    val perfLineRefill = Reg(Vec(nDomains, UInt(64.W)))
+    val perfWriteBack = Reg(Vec(nDomains, UInt(64.W)))
+    val perfSinkAStall = Reg(Vec(nDomains, UInt(64.W)))
+    // val perfSinkCStall = Reg(Vec(nDomains, UInt(64.W)))
+
     // Create the L2 Banks
-    val mods = (node.in zip node.out) map { case ((in, edgeIn), (out, edgeOut)) =>
+    val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
       edgeOut.manager.managers.foreach { m =>
         require (m.supportsAcquireB.contains(xfer),
           s"All managers behind the L2 must support acquireB($xfer) " +
@@ -162,12 +281,15 @@ class InclusiveCache(
       out <> scheduler.io.out
       scheduler.io.ways := DontCare
       scheduler.io.divs := DontCare
+      scheduler.io.perfEnable := perfEnable
+
+      perBankEvent(i.U).didEventOccur := scheduler.io.perfEvents.sinkAStall.didEventOccur
+      perBankEvent(i.U).domainId := scheduler.io.perfEvents.sinkAStall.domainId
 
       // Tie down default values in case there is no controller
       scheduler.io.req.valid := false.B
       scheduler.io.req.bits.address := 0.U
       scheduler.io.resp.ready := true.B
-
 
       // Fix-up the missing addresses. We do this here so that the Scheduler can be
       // deduplicated by Firrtl to make hierarchical place-and-route easier.
@@ -182,70 +304,96 @@ class InclusiveCache(
 
     val enGlobal = RegInit(0.B)
 
-    val outerAcquireCount = Seq.fill(nDomains)(Reg(Vec(8,UInt(25.W))))
-    val acquireBudget = Reg(UInt(25.W))
-    //acquireBudget := 2.U
+    val outerAcquireCount = Reg(Vec(nDomains, UInt(64.W)))
+    val acquireBudget = Reg(Vec(nDomains,UInt(64.W)))
 
-    val periodCount = RegInit(0.U(25.W))
-    val periodLength = Reg(UInt(25.W))
+    val periodCount = RegInit(0.U(64.W))
+    val periodLength = Reg(UInt(64.W))
     val periodReset = Wire(Bool())
-
-    //periodLength := 200.U
 
     periodReset := periodCount >= periodLength
     periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
 
-    when ( periodReset ) {
-      printf("Reset\n")
+    for ( i <- 0 until nDomains) {
+      val anySinkAStall = perBankEvent.map(_.didEventOccur).reduce(_||_)
+      val domain = perBankEvent.map(_.domainId === i.U).reduce(_||_)
+      perfSinkAStall(i.U) := Mux(perfEnable, Mux(!domain, 0.U + perfSinkAStall(i.U), anySinkAStall + perfSinkAStall(i.U)), 0.U)
     }
 
-    val bankAcquires = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, Bool()))
     val acquireDRAMBank = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, UInt(3.W)))
 
-    var bank = 0
-    val activeDomains = mods.map( sched => {
-      val didBankFireAcquire = sched.io.outerAcquireInfo.didFireAcquire
+    val activeAcquireDomains = mods.map( sched => {
+      val didBankFireAcquire = sched.io.out.a.fire
       val firedDomainId = WireDefault(nDomains.U)
-      val dramBank = sched.io.outerAcquireInfo.dramBank
-      bankAcquires(bank.U) := didBankFireAcquire
-      acquireDRAMBank(bank.U) := dramBank
 
       when ( didBankFireAcquire ) {
-        SynthesizePrintf(printf("%d: Bank %d fired acquire\n", periodCount, bank.U))
-        firedDomainId := sched.io.outerAcquireInfo.regulationDomain
+        firedDomainId := sched.io.out.a.bits.domainId
+        printf("LLC: read out fired domain %d\n", firedDomainId)
       }
-      bank = bank+1
+
+      firedDomainId
+    })
+
+    val activeReleaseDomains = mods.map( sched => {
+      val didBankFireRelease = node.out(0)._2.last(sched.io.out.c) && sched.io.out.c.bits.opcode === TLMessages.ReleaseData
+      val firedDomainId = WireDefault(nDomains.U)
+
+      when ( didBankFireRelease ) {
+        firedDomainId := sched.io.out.c.bits.domainId
+        printf("LLC: write out fired domain %d\n", firedDomainId)
+      }
+
+      when ( sched.io.in.c.fire ) {
+        printf("LLC: write in fired domain %d\n", sched.io.in.c.bits.domainId)
+      }
 
       firedDomainId
     })
 
     for ( i <- 0 until nDomains ) {
-      for ( j <- 0 until 8 ) {
-        val didDomainFire = activeDomains.map( id => id === i.U ).reduce(_||_)
-        val isThisDramBank = didDomainFire && acquireDRAMBank.map( bank => bank === j.U).reduce(_||_)
-        outerAcquireCount(i)(j.U) := Mux(periodReset || !enGlobal, 0.U + isThisDramBank, isThisDramBank + outerAcquireCount(i)(j.U))
+      val didDomainFireAcquire = activeAcquireDomains.map( id => id === i.U ).reduce(_||_)
+      val didDomainFireRelease = activeReleaseDomains.map( id => id === i.U ).reduce(_||_)
 
-        mods.foreach{ sched =>
-          sched.io.throttle.regulationDomain(i.U) := (outerAcquireCount(i)(j.U) >= acquireBudget) && enGlobal
-          sched.io.throttle.dramBank(j.U) := (outerAcquireCount(i)(j.U) >= acquireBudget) && enGlobal
-        }
-
-        when ( didDomainFire ) {
-          SynthesizePrintf(printf("Active banks %x\n", i.U))
-        }
+      outerAcquireCount(i.U) := Mux(periodReset || !enGlobal, 0.U + didDomainFireAcquire, didDomainFireAcquire + outerAcquireCount(i.U))
+      perfLineRefill(i.U) := Mux(perfEnable, didDomainFireAcquire + perfLineRefill(i.U), 0.U)
+      perfWriteBack(i.U) := Mux(perfEnable, didDomainFireRelease + perfWriteBack(i.U), 0.U)
+      
+      when (perfEnable && didDomainFireAcquire) {
+        printf("Domain %d line refill count: %d\n", i.U, perfLineRefill(i.U))
+        printf("Domain %d reg count: %d\n", i.U, outerAcquireCount(i.U))
       }
+
+      mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal )
+
+      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal
     }
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
 
     val periodLenRegField = RegField(periodLength.getWidth, periodLength, RegFieldDesc("periodLength", "Period length"))
 
-    val maxReadRegField = RegField(acquireBudget.getWidth, acquireBudget, RegFieldDesc("acquireBudget", "Read budget"))
+    val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(64, reg,
+        RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
+
+    val perfEnField = RegField(perfEnable.getWidth, perfEnable, RegFieldDesc("perfEnable", "Perf counter enable"))
+
+    val lineRefillRegField = perfLineRefill.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
+        RegFieldDesc(s"lineRefill$i", s"Line refill count for domain $i")) }
+
+    val writeBackRegField = perfWriteBack.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
+        RegFieldDesc(s"writeBack$i", s"Write back count for domain $i")) }
+
+    val sinkAStallRegField = perfSinkAStall.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
+        RegFieldDesc(s"sinkAStall$i", s"Sink A stall cycles for domain $i")) }
 
     regnode.regmap(
       0x000 -> Seq(enGlobalField),
       0x008 -> Seq(periodLenRegField),
-      0x010 -> Seq(maxReadRegField),
+      0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
+      0x650 -> Seq(perfEnField),
+      0x660 -> RegFieldGroup("LineRefill", Some("Per-domain line refill count"), lineRefillRegField),
+      0x680 -> RegFieldGroup("WriteBack", Some("Per-domain writeback count"), writeBackRegField),
+      0x700 -> RegFieldGroup("SinkAStall", Some("Per-domain sinkA stall cycle count"), sinkAStallRegField),
     )
 
     ctrls.foreach { ctrl =>

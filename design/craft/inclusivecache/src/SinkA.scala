@@ -22,6 +22,8 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 
+import midas.targetutils.SynthesizePrintf
+
 class PutBufferAEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val data = UInt(params.inner.bundle.dataBits.W)
@@ -43,6 +45,9 @@ class SinkA(params: InclusiveCacheParameters) extends Module
     // for use by SourceD:
     val pb_pop  = Flipped(Decoupled(new PutBufferPop(params)))
     val pb_beat = new PutBufferAEntry(params)
+
+    val perfEnable = Input(Bool())
+    val perfStall = Output(new PerfEventInfo())
   })
 
   // No restrictions on the type of buffer
@@ -71,7 +76,25 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   val buf_block = hasData && !putbuffer.io.push.ready
   val set_block = hasData && first && !free
 
+  val internalStallCount = RegInit(0.U(64.W))
+
   params.ccover(a.valid && req_block, "SINKA_REQ_STALL", "No MSHR available to sink request")
+  io.perfStall.didEventOccur := false.B
+  io.perfStall.domainId := 4.U
+  when ( a.valid && req_block ) {
+    io.perfStall.didEventOccur := true.B
+    io.perfStall.domainId := a.bits.domainId
+    internalStallCount := internalStallCount + 1.U
+  }
+
+  when ( a.fire && io.perfEnable ) {
+    SynthesizePrintf(printf("SinkA: fired domain %d, stalled for %d\n", a.bits.domainId, internalStallCount))
+  }
+
+  when ( a.fire ) {
+    internalStallCount := 0.U
+  }
+
   params.ccover(a.valid && buf_block, "SINKA_BUF_STALL", "No space in putbuffer for beat")
   params.ccover(a.valid && set_block, "SINKA_SET_STALL", "No space in putbuffer for request")
 
@@ -93,7 +116,7 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   io.req.bits.set    := set
   io.req.bits.tag    := tag
   io.req.bits.put    := put
-  io.req.bits.domainId := io.a.bits.domainId
+  io.req.bits.domainId := a.bits.domainId
 
   putbuffer.io.push.bits.index := put
   putbuffer.io.push.bits.data.data    := a.bits.data

@@ -50,6 +50,7 @@ class MSHRStatus(params: InclusiveCacheParameters) extends InclusiveCacheBundle(
   val nestB  = Bool()
   val blockC = Bool()
   val nestC  = Bool()
+  val domainId = UInt(2.W)
 }
 
 class NestedWriteback(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -95,7 +96,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val sinke     = Flipped(Valid(new SinkEResponse(params)))
     val nestedwb  = Flipped(new NestedWriteback(params))
 
-    val throttle = Input(new ThrottleBundle())
+    val throttle = Input(Vec(4, Bool()))
   })
 
   val request_valid = RegInit(false.B)
@@ -165,6 +166,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   }
 
   // Scheduler status
+  io.status.bits.domainId := request.domainId
   io.status.valid := request_valid
   io.status.bits.set    := request.set
   io.status.bits.tag    := request.tag
@@ -179,6 +181,10 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   //   acquire waiting for grant, inner release gets queued, outer probe -> inner probe -> deadlock
   // ... this is possible because the release+probe can be for same set, but different tag
 
+  // when ( io.status.valid && io.status.bits.nestC ) {
+  //   SynthesizePrintf(printf("NestC: w_rprobeackfirst %d, w_pprobeackfirst %d, w_grantfirst %d\n", !w_rprobeackfirst, !w_pprobeackfirst, !w_grantfirst))
+  // }
+
   // We can only demand: block, nest, or queue
   assert (!io.status.bits.nestB || !io.status.bits.blockB)
   assert (!io.status.bits.nestC || !io.status.bits.blockC)
@@ -187,7 +193,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
                         io.throttle.dramBank((params.expandAddress(io.schedule.bits.a.bits.tag, io.schedule.bits.a.bits.set, 0.U) >> 13.U) & 7.U)
   // Scheduler requests
   val no_wait = w_rprobeacklast && w_releaseack && w_grantlast && w_pprobeacklast && w_grantack
-  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe
+  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe //&& !(io.throttle(request.domainId) && meta_valid)
   io.schedule.bits.b.valid := !s_rprobe || !s_pprobe
   io.schedule.bits.c.valid := (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant
@@ -197,11 +203,11 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.reload := no_wait
   io.schedule.valid := ( io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
-                       io.schedule.bits.dir.valid ) && !( should_throttle )
+                       io.schedule.bits.dir.valid) //&& !(io.throttle(request.domainId)) // io.schedule.bits.a.bits.domainId when setup
 
-  when ( should_throttle ) {
-    SynthesizePrintf(printf("Throttling MSHR\n"))
-  }
+  // when ( io.throttle(io.schedule.bits.a.bits.domainId) ) {
+  //   SynthesizePrintf(printf("MSHR throttling\n"))
+  // }
 
   // Schedule completions
   when (io.schedule.ready) {
@@ -301,6 +307,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.c.bits.opcode  := Mux(meta.dirty, ReleaseData, Release)
   io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, TtoN)
   io.schedule.bits.c.bits.source  := 0.U
+  io.schedule.bits.c.bits.domainId := request.domainId
   io.schedule.bits.c.bits.tag     := meta.tag
   io.schedule.bits.c.bits.set     := request.set
   io.schedule.bits.c.bits.way     := meta.way
@@ -544,8 +551,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     assert (!request_valid || (no_wait && io.schedule.fire))
     request_valid := true.B
     request := io.allocate.bits
-    request.domainId := Mux(io.allocate.bits.opcode === TLMessages.AcquireBlock || io.allocate.bits.opcode === TLMessages.AcquirePerm,
-                          io.allocate.bits.domainId, request.domainId)
+    request.domainId := io.allocate.bits.domainId
   }
 
   // Create execution plan

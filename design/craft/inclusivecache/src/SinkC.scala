@@ -30,6 +30,7 @@ class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val source = UInt(params.inner.bundle.sourceBits.W)
   val param  = UInt(3.W)
   val data   = Bool()
+  val domainId = UInt(2.W)
 }
 
 class PutBufferCEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -53,6 +54,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     // SourceD sideband
     val rel_pop  = Flipped(Decoupled(new PutBufferPop(params)))
     val rel_beat = new PutBufferCEntry(params)
+
+    val perfEnable = Input(Bool())
+    val perfStall = Output(new PerfEventInfo())
   })
 
   if (params.firstLevel) {
@@ -111,6 +115,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.resp.bits.source := c.bits.source
     io.resp.bits.param  := c.bits.param
     io.resp.bits.data   := hasData
+    io.resp.bits.domainId := c.bits.domainId
 
     val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferCEntry(params), params.relLists, params.relBeats, false)))
     val lists = RegInit(0.U(params.relLists.W))
@@ -131,6 +136,13 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     params.ccover(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
     params.ccover(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
 
+    io.perfStall.didEventOccur := false.B
+    io.perfStall.domainId := 4.U
+    when ( c.valid && !raw_resp && ( req_block || buf_block || set_block ) ) {
+      io.perfStall.didEventOccur := true.B
+      io.perfStall.domainId := c.bits.domainId
+    }
+
     c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
 
     io.req.valid := !resp && c.valid && first && !buf_block && !set_block
@@ -149,7 +161,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.req.bits.set    := set
     io.req.bits.tag    := tag
     io.req.bits.put    := put
-    io.req.bits.domainId := 0.U
+    io.req.bits.domainId := c.bits.domainId
 
     putbuffer.io.push.bits.index := put
     putbuffer.io.push.bits.data.data    := c.bits.data

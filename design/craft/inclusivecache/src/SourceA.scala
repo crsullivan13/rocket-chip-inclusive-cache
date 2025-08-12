@@ -38,31 +38,62 @@ class SourceA(params: InclusiveCacheParameters) extends Module
 {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
+    val domainReadys = Output(Vec(4, Bool()))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
-    //val throttle = Input(new ThrottleBundle())
-    val outerAcquireInfo = Output(new OuterAcquireInfo())
+    val throttle = Input(Vec(4, Bool()))
+    //val outerAcquireInfo = Output(new OuterAcquireInfo())
   })
 
   // ready must be a register, because we derive valid from ready
   require (!params.micro.outerBuf.a.pipe && params.micro.outerBuf.a.isDefined)
 
-  val a = Wire(chiselTypeOf(io.a))
-  val buffer = params.micro.outerBuf.a(a)
-  io.a <> buffer
-  buffer.ready := io.a.ready //&& !(io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock)
-  io.a.valid := buffer.valid //&& !(io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock)
+  // io.outerAcquireInfo.didFireAcquire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
+  // io.outerAcquireInfo.dramBank := (a.bits.address >> 13.U) & 7.U // magic numbers are 8KB rows and 8 banks
+  // io.outerAcquireInfo.regulationDomain := a.bits.domainId
+  val domainAs = Seq.fill(4)(Wire(chiselTypeOf(io.a)))
+  val domainBuffs = domainAs.map( a => { params.micro.outerBuf.a(a) } )
 
-  // when ( io.throttle && buffer.bits.opcode === TLMessages.AcquireBlock ) {
-  //   SynthesizePrintf(printf("SourceA throttling\n"))
-  // }
+  val domainReadys = Wire(Vec(4, Bool()))
 
-  io.outerAcquireInfo.didFireAcquire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
-  io.outerAcquireInfo.dramBank := (a.bits.address >> 13.U) & 7.U // magic numbers are 8KB rows and 8 banks
-  io.outerAcquireInfo.regulationDomain := a.bits.domainId
+  val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle),4))
 
-  io.req.ready := a.ready
-  a.valid := io.req.valid
-  params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
+  // io.outerAcquireInfo.didFireAcquire := io.a.fire
+  // io.outerAcquireInfo.regulationDomain := io.a.bits.domainId // when setup
+
+  for ( i <- 0 until 4 ) {
+    val a = domainAs(i)
+    val buffer = domainBuffs(i)
+
+    io.domainReadys(i) := a.ready
+    domainReadys(i) := a.ready
+
+    arb.io.in(i) <> buffer
+    buffer.ready := arb.io.in(i).ready && !(io.throttle(i))
+    arb.io.in(i).valid := buffer.valid && !(io.throttle(i))
+
+    a.valid := io.req.valid && io.req.bits.domainId === i.U
+    params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
+    when ( a.valid && !a.ready ) {
+      SynthesizePrintf(printf("SourceA: Valid req, a not ready, domain %d\n", a.bits.domainId))
+    }
+
+    a.bits.domainId := io.req.bits.domainId
+    a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
+    a.bits.param   := io.req.bits.param
+    a.bits.size    := params.offsetBits.U
+    a.bits.source  := io.req.bits.source
+    a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, 0.U)
+    a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
+    a.bits.data    := 0.U
+    a.bits.corrupt := false.B
+  }
+
+  io.a <> arb.io.out
+
+  // this should really be the ready of the buffer that corresponds to incomming request's domain
+  // doing that creates a combinational loop i haven't solved, andR of all for now
+  //io.req.ready := domainAs.map( a => a.ready).reduce(_&&_)
+  io.req.ready := MuxLookup(io.req.bits.domainId, domainReadys(0), (0 until 4).map( i => i.U -> domainReadys(i) ) )
 
   a.bits.domainId := io.req.bits.domainId
   a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
