@@ -67,7 +67,7 @@ object InclusiveCachePortParameters
     e = BufferParams.none)
 
   val full = InclusiveCachePortParameters(
-    a = BufferParams.default,
+    a = BufferParams(2, false, false),
     b = BufferParams.default,
     c = BufferParams.default,
     d = BufferParams.default,
@@ -165,6 +165,7 @@ case class InclusiveCacheParameters(
   val putBeats = max(2*cache.blockBeats, micro.memCycles)
   val relLists = 2
   val relBeats = relLists*cache.blockBeats
+  println(s"CACHE: realBeats is ${relBeats}")
 
   val flatAddresses = AddressSet.unify(outer.manager.managers.flatMap(_.address))
   val pickMask = AddressDecoder(flatAddresses.map(Seq(_)), flatAddresses.map(_.mask).reduce(_|_))

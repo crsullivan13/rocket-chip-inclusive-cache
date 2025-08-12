@@ -191,7 +191,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Scheduler requests
   val no_wait = w_rprobeacklast && w_releaseack && w_grantlast && w_pprobeacklast && w_grantack
-  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe
+  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe //&& !(io.throttle(request.domainId) && meta_valid)
   io.schedule.bits.b.valid := !s_rprobe || !s_pprobe
   io.schedule.bits.c.valid := (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant
@@ -203,9 +203,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
                        io.schedule.bits.dir.valid) //&& !(io.throttle(request.domainId)) // io.schedule.bits.a.bits.domainId when setup
 
-  when ( io.throttle(io.schedule.bits.a.bits.domainId) ) {
-    SynthesizePrintf(printf("MSHR throttling\n"))
-  }
+  // when ( io.throttle(io.schedule.bits.a.bits.domainId) ) {
+  //   SynthesizePrintf(printf("MSHR throttling\n"))
+  // }
 
   // Schedule completions
   when (io.schedule.ready) {

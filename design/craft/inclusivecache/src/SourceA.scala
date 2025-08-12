@@ -38,6 +38,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
 {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
+    val domainReadys = Output(Vec(4, Bool()))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
     val throttle = Input(Vec(4, Bool()))
     val outerAcquireInfo = Output(new OuterAcquireInfo())
@@ -55,7 +56,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   val domainAs = Seq.fill(4)(Wire(chiselTypeOf(io.a)))
   val domainBuffs = domainAs.map( a => { params.micro.outerBuf.a(a) } )
 
-  val domainReadys = Reg(Vec(4, Bool()))
+  val domainReadys = Wire(Vec(4, Bool()))
 
   val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle),4))
 
@@ -68,6 +69,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     val a = domainAs(i)
     val buffer = domainBuffs(i)
 
+    io.domainReadys(i) := a.ready
     domainReadys(i) := a.ready
 
     arb.io.in(i) <> buffer
@@ -95,8 +97,8 @@ class SourceA(params: InclusiveCacheParameters) extends Module
 
   // this should really be the ready of the buffer that corresponds to incomming request's domain
   // doing that creates a combinational loop i haven't solved, andR of all for now
-  io.req.ready := domainAs.map( a => a.ready).reduce(_&&_)
-  //io.req.ready := MuxLookup(io.req.bits.domainId, domainReadys(0), (0 until 4).map( i => i.U -> domainReadys(i) ) ) //domainReadys(0.U)
+  //io.req.ready := domainAs.map( a => a.ready).reduce(_&&_)
+  io.req.ready := MuxLookup(io.req.bits.domainId, domainReadys(0), (0 until 4).map( i => i.U -> domainReadys(i) ) )
 
   // io.req.ready := a.ready
   // a.valid := io.req.valid

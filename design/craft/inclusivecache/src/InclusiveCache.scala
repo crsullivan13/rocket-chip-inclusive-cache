@@ -195,7 +195,7 @@ class InclusiveCache(
     val hasInterrupted = Seq.fill(cache.numCPUs)(RegInit(false.B))
     val coreDoInterrupt = Seq.fill(cache.numCPUs)(WireInit(false.B))
 
-    val memguardPeriodCntr = Reg(UInt(25.W))
+    // val memguardPeriodCntr = Reg(UInt(25.W))
     val memguardPeriodCntrReset = VecInit(Seq.fill(cache.numCPUs)(RegInit(false.B)))
 
     for (j <- 0 until cache.numCPUs)
@@ -284,7 +284,7 @@ class InclusiveCache(
       val outCIsWb =  in.c.bits.opcode === TLMessages.ReleaseData || in.c.bits.opcode === TLMessages.ProbeAckData
       val isMiss = (outaIsAcquire || (outaIsInstFetch && countInstFetch)) && scheduler.io.out.a.fire
       val isWbToDRAM = (outCIsWb && edgeOut.last(scheduler.io.out.c))
-      val toDRAM = (isMiss)
+      val toDRAM = (outaIsAcquire || (outaIsInstFetch && countInstFetch)) && scheduler.io.out.a.fire
       val isAccess = ((aIsWrite || aIsRead || (aIsInstFetch && countInstFetch)) && in.a.fire) || (cIsWb && in.c.fire) 
       when (!memguardPeriodCntrReset(outDomainID))
       {
@@ -328,11 +328,11 @@ class InclusiveCache(
 
     val enGlobal = RegInit(0.B)
 
-    val outerAcquireCount = Reg(Vec(nDomains, UInt(25.W)))
-    val acquireBudget = Reg(Vec(nDomains,UInt(25.W)))
+    val outerAcquireCount = Reg(Vec(nDomains, UInt(64.W)))
+    val acquireBudget = Reg(Vec(nDomains,UInt(64.W)))
 
-    val periodCount = RegInit(0.U(25.W))
-    val periodLength = Reg(UInt(25.W))
+    val periodCount = RegInit(0.U(64.W))
+    val periodLength = Reg(UInt(64.W))
     val periodReset = Wire(Bool())
 
     periodReset := periodCount >= periodLength
@@ -350,6 +350,11 @@ class InclusiveCache(
 
       when ( didBankFireAcquire ) {
         firedDomainId := sched.io.out.a.bits.domainId
+        printf("LLC: read out fired domain %d\n", firedDomainId)
+      }
+
+      when ( sched.io.in.a.fire ) {
+        printf("LLC: read in fired domain %d\n", sched.io.in.a.bits.domainId)
       }
 
       firedDomainId
@@ -361,6 +366,11 @@ class InclusiveCache(
 
       when ( didBankFireRelease ) {
         firedDomainId := sched.io.out.c.bits.domainId
+        printf("LLC: write out fired domain %d\n", firedDomainId)
+      }
+
+      when ( sched.io.in.c.fire ) {
+        printf("LLC: write in fired domain %d\n", sched.io.in.c.bits.domainId)
       }
 
       firedDomainId
@@ -388,7 +398,7 @@ class InclusiveCache(
 
     val periodLenRegField = RegField(periodLength.getWidth, periodLength, RegFieldDesc("periodLength", "Period length"))
 
-    val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(32, reg,
+    val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(64, reg,
         RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
 
     // Memguard

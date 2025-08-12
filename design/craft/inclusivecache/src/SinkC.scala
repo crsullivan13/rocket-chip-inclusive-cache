@@ -30,6 +30,7 @@ class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val source = UInt(params.inner.bundle.sourceBits.W)
   val param  = UInt(3.W)
   val data   = Bool()
+  val domainId = UInt(2.W)
 }
 
 class PutBufferCEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -114,6 +115,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.resp.bits.source := c.bits.source
     io.resp.bits.param  := c.bits.param
     io.resp.bits.data   := hasData
+    io.resp.bits.domainId := c.bits.domainId
 
     val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferCEntry(params), params.relLists, params.relBeats, false)))
     val lists = RegInit(0.U(params.relLists.W))

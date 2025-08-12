@@ -120,6 +120,13 @@ class SourceC(params: InclusiveCacheParameters) extends Module
   // We never accept at the front-end unless we're sure things will fit
   assert(!c.valid || c.ready)
   params.ccover(!c.ready, "SOURCEC_QUEUE_FULL", "Eviction queue fully utilized")
+  when ( !c.ready ) {
+    printf("LLC: SourceC queue is full\n")
+  }
+
+  when ( !io.c.ready ) {
+    printf("LLC: SourceC outedge is not ready\n")
+  }
 
   queue.io.enq <> c
   io.c <> queue.io.deq
