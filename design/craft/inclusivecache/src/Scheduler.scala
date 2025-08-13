@@ -38,7 +38,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     val req = Flipped(Decoupled(new SinkXRequest(params)))
     val resp = Decoupled(new SourceXRequest(params))
 
-    val throttle = Input(Vec(4, Bool()))
+    val throttle = Input(Vec(4, new ThrottleBundle()))
     //val outerAcquireInfo = Output(new OuterAcquireInfo())
 
     val perfEnable = Input(Bool())
@@ -100,7 +100,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     m.io.nestedwb := nestedwb
   }
 
-  mshrs.foreach { case m => m.io.throttle := io.throttle }
+  //mshrs.foreach { case m => m.io.throttle := io.throttle }
 
   // If the pre-emption BC or C MSHR have a matching set, the normal MSHR must be blocked
   val mshr_stall_abc = abc_mshrs.map { m =>
@@ -126,6 +126,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   if (!params.lastLevel)
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
+  val nDramBanks = 8
+  val dramBankOffset = 16
+
   // Consider scheduling an MSHR only if all the resources it requires are available
   val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) => {
       val base = m.io.schedule.valid && !s &&
@@ -142,8 +145,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       //     !(m.io.schedule.bits.c.valid && io.throttle(m.io.schedule.bits.c.bits.domainId) && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)
       //   } else { 
       //     true.B 
-      //   }
-      val noThrottle = !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId))
+      //   } params.expandAddress(m.io.schedule.bits.a.tag, m.io.schedule.bits.a.set, 0.U)
+      val mshrDramBankTarget = ( params.expandAddress(m.io.schedule.bits.a.bits.tag, m.io.schedule.bits.a.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
+      val shouldThrottle = io.throttle(m.io.schedule.bits.a.bits.domainId).dramBank(mshrDramBankTarget)
+      val noThrottle = !(m.io.schedule.bits.a.valid && shouldThrottle)
 
       base && noThrottle
     }

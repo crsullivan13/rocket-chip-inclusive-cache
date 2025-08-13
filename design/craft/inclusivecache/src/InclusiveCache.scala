@@ -31,22 +31,6 @@ import freechips.rocketchip.tile._
 
 import midas.targetutils.SynthesizePrintf
 
-class OuterAcquireInfo() extends Bundle {
-  val dramBank = UInt(3.W)
-  val didFireAcquire = Bool()
-  val regulationDomain = UInt(2.W)
-}
-
-class ThrottleBundle() extends Bundle {
-  val regulationDomain = Vec(4,Bool())
-  val dramBank = Vec(8,Bool())
-}
-
-class OuterAcquireInfo() extends Bundle {
-  val regulationDomain = UInt(2.W)
-  val didFireAcquire = Bool()
-}
-
 // TODO: Unify/remove these info bundles, i.e. make the code not bad
 class PerfEventInfo() extends Bundle {
   val domainId = UInt(2.W)
@@ -56,6 +40,10 @@ class PerfEventInfo() extends Bundle {
 class PerfEvents() extends Bundle {
   val sinkAStall = new PerfEventInfo()
   val sinkCStall = new PerfEventInfo()
+}
+
+class ThrottleBundle() extends Bundle {
+  val dramBank = Vec(8, Bool())
 }
 
 // class OuterReleaseInfo() extends Bundle {
@@ -119,8 +107,6 @@ class InclusiveCache(
     }
   }
 
-  val intSrc = IntSourceNode(IntSourcePortSimple(num = cache.numCPUs, resources = device.int))
-
   val node: TLAdapterNode = TLAdapterNode(
     clientFn  = { _ => TLClientPortParameters(Seq(TLClientParameters(
       name          = s"L${cache.level} InclusiveCache",
@@ -155,11 +141,6 @@ class InclusiveCache(
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
-    // Memguard
-    val bundleParamsIn = node.in(0)._2.bundle
-    val bundleParamsOut = node.out(0)._2.bundle
-    val membase =  p(ExtMem).get.master.base
-    val nBanks = p(SubsystemBankedCoherenceKey).nBanks
 
     // If you have a control port, you must have at least one cache port
     require (ctrls.isEmpty || !node.edges.in.isEmpty)
@@ -177,85 +158,10 @@ class InclusiveCache(
       println("")
     }
 
-/*
-      Performance Counters that we added
-    */
-    val countInstFetch = RegInit(true.B)
-    val AccessCounterReset = RegInit(false.B)
-    val EnableInterrupt = Seq.fill(cache.numCPUs)(RegInit(false.B))
- 
-    /*
-        Per-CacheBank counters
-    */
-    val PerBankMissCounters =  Seq.fill(nBanks)(RegInit(VecInit(Seq.fill(cache.numCPUs)(0.U(64.W)))))
-    val PerBankAccessCounters = Seq.fill(nBanks)(RegInit(VecInit(Seq.fill(cache.numCPUs)(0.U(64.W)))))
- 
-    // Per-CPU counters
-    val MissCounters = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
-    val AccessCounters = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
-
-    // Per-CPU Regulation Budgets
-    val CoreBudgets = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
-
-    // only interrupt the core once per period
-    val hasInterrupted = Seq.fill(cache.numCPUs)(RegInit(false.B))
-    val coreDoInterrupt = Seq.fill(cache.numCPUs)(WireInit(false.B))
-
-    // val memguardPeriodCntr = Reg(UInt(25.W))
-    val memguardPeriodCntrReset = VecInit(Seq.fill(cache.numCPUs)(RegInit(false.B)))
-
-    for (j <- 0 until cache.numCPUs)
-    {
-      when (memguardPeriodCntrReset(j)) // Reset all
-      {
-          for (i <- 0 until nBanks)
-          {
-              PerBankAccessCounters(i)(j) := 0.U
-              PerBankMissCounters(i)(j) := 0.U
-          }
-
-          MissCounters(j) := 0.U
-          AccessCounters(j) := 0.U
-          hasInterrupted(j) := false.B
-
-      }
-      .otherwise // Calculate per core total accesses
-      {
-            val tmpSumMiss = VecInit(Seq.fill(nBanks)(0.U(64.W)))
-            val tmpSumAccess = VecInit(Seq.fill(nBanks)(0.U(64.W)))
-            tmpSumMiss(0) := PerBankMissCounters(0)(j)
-            tmpSumAccess(0) := PerBankAccessCounters(0)(j)
-            for (i <- 1 until nBanks)
-            {
-              tmpSumMiss(i) := PerBankMissCounters(i)(j) + tmpSumMiss(i-1)
-              tmpSumAccess(i) := PerBankAccessCounters(i)(j) + tmpSumAccess(i-1)
-            }
-
-            MissCounters(j) := tmpSumMiss(nBanks - 1)
-            AccessCounters(j) := tmpSumAccess(nBanks- 1)
-
-      }
-    }
-
-    /* 
-      Core will generate an interrupt if it is over budget and it is the first interrupt,
-      or if there is a new period and we must interrupt to let it get rid of the throttle task
-    */
-    println(s"CACHE COUNTER intSrc.out.size = ${intSrc.out.length}, intSrc.out(0).size = ${intSrc.out(0)._1.length}")
-    for (i <- 0 until cache.numCPUs)
-    {
-        val overBudget = MissCounters(i) >= CoreBudgets(i) && EnableInterrupt(i)        // we should take this out to do 1ms regulation
-        coreDoInterrupt(i) := (overBudget && EnableInterrupt(i) && !hasInterrupted(i)) //|| (hasInterrupted(i) && periodCntrReset)
-        when (!memguardPeriodCntrReset(i)) // do not drive signal twice
-        {
-          hasInterrupted(i) := coreDoInterrupt(i) || hasInterrupted(i)
-        } 
-        val (intOut, _) = intSrc.out(0) // does this need to be i as well? --> that causes an error
-        intOut(i) := coreDoInterrupt(i)
-
-    }
     val perBankEvent = Wire(Vec(2, new PerfEventInfo()))
     val nDomains = 4
+    val nDramBanks = 8
+    val dramBankOffset = 16
 
     val perfEnable = RegInit(false.B)
     val perfLineRefill = Reg(Vec(nDomains, UInt(64.W)))
@@ -300,11 +206,9 @@ class InclusiveCache(
       scheduler
     }
 
-    val nDomains = 4
-
     val enGlobal = RegInit(0.B)
 
-    val outerAcquireCount = Reg(Vec(nDomains, UInt(64.W)))
+    val outerAcquireCount = Seq.fill(nDomains)(Reg(Vec(nDramBanks, UInt(64.W))))
     val acquireBudget = Reg(Vec(nDomains,UInt(64.W)))
 
     val periodCount = RegInit(0.U(64.W))
@@ -320,18 +224,20 @@ class InclusiveCache(
       perfSinkAStall(i.U) := Mux(perfEnable, Mux(!domain, 0.U + perfSinkAStall(i.U), anySinkAStall + perfSinkAStall(i.U)), 0.U)
     }
 
-    val acquireDRAMBank = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, UInt(3.W)))
+    // val acquireDRAMBank = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, UInt(3.W)))
 
     val activeAcquireDomains = mods.map( sched => {
       val didBankFireAcquire = sched.io.out.a.fire
       val firedDomainId = WireDefault(nDomains.U)
+      val dramBankTarget = WireDefault(nDramBanks.U)
 
       when ( didBankFireAcquire ) {
         firedDomainId := sched.io.out.a.bits.domainId
+        dramBankTarget := ( sched.io.out.a.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
         printf("LLC: read out fired domain %d\n", firedDomainId)
       }
 
-      firedDomainId
+      (firedDomainId: UInt, dramBankTarget: UInt)
     })
 
     val activeReleaseDomains = mods.map( sched => {
@@ -351,21 +257,19 @@ class InclusiveCache(
     })
 
     for ( i <- 0 until nDomains ) {
-      val didDomainFireAcquire = activeAcquireDomains.map( id => id === i.U ).reduce(_||_)
+      val didDomainFireAcquire = activeAcquireDomains.map{ case (id, _) => id === i.U }.reduce(_||_)
       val didDomainFireRelease = activeReleaseDomains.map( id => id === i.U ).reduce(_||_)
 
-      outerAcquireCount(i.U) := Mux(periodReset || !enGlobal, 0.U + didDomainFireAcquire, didDomainFireAcquire + outerAcquireCount(i.U))
-      perfLineRefill(i.U) := Mux(perfEnable, didDomainFireAcquire + perfLineRefill(i.U), 0.U)
-      perfWriteBack(i.U) := Mux(perfEnable, didDomainFireRelease + perfWriteBack(i.U), 0.U)
-      
-      when (perfEnable && didDomainFireAcquire) {
-        printf("Domain %d line refill count: %d\n", i.U, perfLineRefill(i.U))
-        printf("Domain %d reg count: %d\n", i.U, outerAcquireCount(i.U))
+      for ( j <- 0 until nDramBanks ) {
+        val didTargetBank = activeAcquireDomains.map{ case (_, bank) => bank === j.U }.reduce(_||_) && didDomainFireAcquire
+        outerAcquireCount(i)(j) := Mux(periodReset || !enGlobal, 0.U + didTargetBank, didTargetBank + outerAcquireCount(i)(j))
+        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := ( (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal ) << j.U )
       }
 
-      mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal )
+      perfLineRefill(i.U) := Mux(perfEnable, didDomainFireAcquire + perfLineRefill(i.U), 0.U)
+      perfWriteBack(i.U) := Mux(perfEnable, didDomainFireRelease + perfWriteBack(i.U), 0.U)
 
-      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal
+      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i)(0.U) >= acquireBudget(i.U)) && enGlobal
     }
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
@@ -421,3 +325,4 @@ class InclusiveCache(
     def json = s"""{"banks":[${mods.map(_.json).mkString(",")}]}"""
   }
 }
+

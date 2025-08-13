@@ -96,7 +96,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val sinke     = Flipped(Valid(new SinkEResponse(params)))
     val nestedwb  = Flipped(new NestedWriteback(params))
 
-    val throttle = Input(Vec(4, Bool()))
+    //val throttle = Input(Vec(4, Bool()))
   })
 
   val request_valid = RegInit(false.B)
@@ -189,8 +189,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   assert (!io.status.bits.nestB || !io.status.bits.blockB)
   assert (!io.status.bits.nestC || !io.status.bits.blockC)
 
-  val should_throttle = io.throttle.regulationDomain(io.schedule.bits.a.bits.domainId) &&
-                        io.throttle.dramBank((params.expandAddress(io.schedule.bits.a.bits.tag, io.schedule.bits.a.bits.set, 0.U) >> 13.U) & 7.U)
+  // val should_throttle = io.throttle.regulationDomain(io.schedule.bits.a.bits.domainId) &&
+  //                       io.throttle.dramBank((params.expandAddress(io.schedule.bits.a.bits.tag, io.schedule.bits.a.bits.set, 0.U) >> 13.U) & 7.U)
   // Scheduler requests
   val no_wait = w_rprobeacklast && w_releaseack && w_grantlast && w_pprobeacklast && w_grantack
   io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe //&& !(io.throttle(request.domainId) && meta_valid)

@@ -153,7 +153,6 @@ class WithInclusiveCache(
         l2.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
-    ibus.fromSync := l2.intSrc
     sbus.BwRegulator.get.dramRegNode := l2.dramRegNode
 
     ElaborationArtefacts.add("l2.json", l2.module.json)
