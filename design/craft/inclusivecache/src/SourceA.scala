@@ -41,7 +41,6 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     val domainReadys = Output(Vec(4, Bool()))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
     val throttle = Input(Vec(4, Bool()))
-    val outerAcquireInfo = Output(new OuterAcquireInfo())
   })
 
   // ready must be a register, because we derive valid from ready
@@ -59,9 +58,6 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   val domainReadys = Wire(Vec(4, Bool()))
 
   val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle),4))
-
-  io.outerAcquireInfo.didFireAcquire := io.a.fire
-  io.outerAcquireInfo.regulationDomain := io.a.bits.domainId // when setup
 
   for ( i <- 0 until 4 ) {
     //io.domainAcquire(i) := Mux(io.a.fire && io.a.bits.opcode === TLMessages.AcquireBlock && io.a.bits.domainId === i.U, 1.B, 0.B)
@@ -99,18 +95,4 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   // doing that creates a combinational loop i haven't solved, andR of all for now
   //io.req.ready := domainAs.map( a => a.ready).reduce(_&&_)
   io.req.ready := MuxLookup(io.req.bits.domainId, domainReadys(0), (0 until 4).map( i => i.U -> domainReadys(i) ) )
-
-  // io.req.ready := a.ready
-  // a.valid := io.req.valid
-  // params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
-
-  // a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
-  // a.bits.param   := io.req.bits.param
-  // a.bits.size    := params.offsetBits.U
-  // a.bits.source  := io.req.bits.source
-  // a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, 0.U)
-  // a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
-  // a.bits.data    := 0.U
-  // a.bits.corrupt := false.B
-  // a.bits.domainId := io.req.bits.domainId
 }

@@ -39,7 +39,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     val resp = Decoupled(new SourceXRequest(params))
 
     val throttle = Input(Vec(4, Bool()))
-    val outerAcquireInfo = Output(new OuterAcquireInfo())
 
     val perfEnable = Input(Bool())
     val perfEvents = Output(new PerfEvents())
@@ -54,7 +53,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   io.out.a <> sourceA.io.a
   sourceA.io.throttle := io.throttle
-  io.outerAcquireInfo := sourceA.io.outerAcquireInfo
   io.out.c <> sourceC.io.c
   //sourceC.io.throttle := io.throttle
   io.out.e <> sourceE.io.e
