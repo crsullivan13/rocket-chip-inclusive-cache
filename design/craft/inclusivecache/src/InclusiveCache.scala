@@ -158,7 +158,7 @@ class InclusiveCache(
       println("")
     }
 
-    val perBankEvent = Wire(Vec(2, new PerfEventInfo()))
+    val perBankEvent = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, new PerfEventInfo()))
     val nDomains = 4
     val nDramBanks = 8
     val dramBankOffset = 16
@@ -263,7 +263,7 @@ class InclusiveCache(
       for ( j <- 0 until nDramBanks ) {
         val didTargetBank = activeAcquireDomains.map{ case (_, bank) => bank === j.U }.reduce(_||_) && didDomainFireAcquire
         outerAcquireCount(i)(j) := Mux(periodReset || !enGlobal, 0.U + didTargetBank, didTargetBank + outerAcquireCount(i)(j))
-        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := ( (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal ) << j.U )
+        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := ( (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal ) )
       }
 
       perfLineRefill(i.U) := Mux(perfEnable, didDomainFireAcquire + perfLineRefill(i.U), 0.U)
