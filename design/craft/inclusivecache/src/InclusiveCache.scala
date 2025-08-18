@@ -155,7 +155,7 @@ class InclusiveCache(
       println("")
     }
 
-    val perBankEvent = Wire(Vec(2, new PerfEventInfo()))
+    val perBankEvent = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, new PerfEventInfo()))
     val nDomains = 4
 
     val perfEnable = RegInit(false.B)
