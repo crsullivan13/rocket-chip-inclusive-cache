@@ -167,6 +167,7 @@ class InclusiveCache(
     val perfLineRefill = Reg(Vec(nDomains, UInt(64.W)))
     val perfWriteBack = Reg(Vec(nDomains, UInt(64.W)))
     val perfSinkAStall = Reg(Vec(nDomains, UInt(64.W)))
+    val perfMSHRHeadStall = Reg(UInt(64.W))
     // val perfSinkCStall = Reg(Vec(nDomains, UInt(64.W)))
 
     // Create the L2 Banks
@@ -231,6 +232,10 @@ class InclusiveCache(
       val firedDomainId = WireDefault(nDomains.U)
       val dramBankTarget = WireDefault(nDramBanks.U)
 
+      when ( sched.io.mshrHeadBlock ) {
+        perfMSHRHeadStall := perfMSHRHeadStall + 1.U
+      }
+
       when ( didBankFireAcquire ) {
         firedDomainId := sched.io.out.a.bits.domainId
         dramBankTarget := ( sched.io.out.a.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
@@ -290,6 +295,8 @@ class InclusiveCache(
     val sinkAStallRegField = perfSinkAStall.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
         RegFieldDesc(s"sinkAStall$i", s"Sink A stall cycles for domain $i")) }
 
+    val mshrHeadBlockRegField = RegField(perfMSHRHeadStall.getWidth, perfMSHRHeadStall, RegFieldDesc("perfMSHRHeadStall", "Perf mshr head stall"))
+
     regnode.regmap(
       0x000 -> Seq(enGlobalField),
       0x008 -> Seq(periodLenRegField),
@@ -298,6 +305,7 @@ class InclusiveCache(
       0x660 -> RegFieldGroup("LineRefill", Some("Per-domain line refill count"), lineRefillRegField),
       0x680 -> RegFieldGroup("WriteBack", Some("Per-domain writeback count"), writeBackRegField),
       0x700 -> RegFieldGroup("SinkAStall", Some("Per-domain sinkA stall cycle count"), sinkAStallRegField),
+      0x720 -> Seq(mshrHeadBlockRegField),
     )
 
     ctrls.foreach { ctrl =>
