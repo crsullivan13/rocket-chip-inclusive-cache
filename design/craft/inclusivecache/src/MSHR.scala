@@ -283,6 +283,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.a.bits.block   := request.size =/= log2Ceil(params.cache.blockBytes).U ||
                                      !(request.opcode === PutFullData || request.opcode === AcquirePerm)
   io.schedule.bits.a.bits.source  := 0.U
+  io.schedule.bits.a.bits.domainId := request.domainId
   io.schedule.bits.b.bits.param   := Mux(!s_rprobe, toN, Mux(request.prio(1), request.param, Mux(req_needT, toN, toB)))
   io.schedule.bits.b.bits.tag     := Mux(!s_rprobe, meta.tag, request.tag)
   io.schedule.bits.b.bits.set     := request.set
@@ -290,6 +291,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.c.bits.opcode  := Mux(meta.dirty, ReleaseData, Release)
   io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, TtoN)
   io.schedule.bits.c.bits.source  := 0.U
+  io.schedule.bits.c.bits.domainId := request.domainId
   io.schedule.bits.c.bits.tag     := meta.tag
   io.schedule.bits.c.bits.set     := request.set
   io.schedule.bits.c.bits.way     := meta.way
@@ -533,6 +535,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     assert (!request_valid || (no_wait && io.schedule.fire))
     request_valid := true.B
     request := io.allocate.bits
+    request.domainId := io.allocate.bits.domainId
   }
 
   // Create execution plan
