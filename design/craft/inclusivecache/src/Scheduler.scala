@@ -141,9 +141,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       //   } else { 
       //     true.B 
       //   }
-      //val noThrottle = !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId))
+      val noThrottle = !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId))
 
-      base //&& noThrottle
+      base && noThrottle
     }
   }.reverse)
 
@@ -165,7 +165,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   schedule.c.bits.source := Mux(schedule.c.bits.opcode(1), mshr_select, 0.U) // only set for Release[Data] not ProbeAck[Data]
   schedule.d.bits.sink   := mshr_select
 
-  sourceA.io.req.valid := schedule.a.valid && !io.throttle(schedule.a.bits.domainId)
+  sourceA.io.req.valid := schedule.a.valid
   sourceB.io.req.valid := schedule.b.valid
   sourceC.io.req.valid := schedule.c.valid
   sourceD.io.req.valid := schedule.d.valid
