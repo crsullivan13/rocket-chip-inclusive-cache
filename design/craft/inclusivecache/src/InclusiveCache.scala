@@ -202,9 +202,13 @@ class InclusiveCache(
     }
 
     val enGlobal = RegInit(0.B)
+    val enDomain = RegInit(0.U(4.W))
+
+    val outerAcquireTokens = Reg(Vec(nDomains, UInt(64.W)))
+    val acquireTokenRate = Reg(Vec(nDomains,UInt(64.W)))
+    val acquireBucketSize = Reg(Vec(nDomains,UInt(64.W)))
 
     val outerAcquireCount = Reg(Vec(nDomains, UInt(64.W)))
-    val acquireBudget = Reg(Vec(nDomains,UInt(64.W)))
 
     val periodCount = RegInit(0.U(64.W))
     val periodLength = Reg(UInt(64.W))
@@ -255,7 +259,9 @@ class InclusiveCache(
       val didDomainFireAcquire = activeAcquireDomains.map( id => id === i.U ).reduce(_||_)
       val didDomainFireRelease = activeReleaseDomains.map( id => id === i.U ).reduce(_||_)
 
-      outerAcquireCount(i.U) := Mux(periodReset || !enGlobal, 0.U + didDomainFireAcquire, didDomainFireAcquire + outerAcquireCount(i.U))
+      val newTokens = Mux(periodReset, Mux(outerAcquireTokens(i.U) < acquireBucketSize(i.U), outerAcquireTokens(i.U) + acquireTokenRate(i.U), outerAcquireTokens(i.U)), outerAcquireTokens(i.U))
+
+      outerAcquireTokens(i.U) := Mux(!enGlobal || !enDomain(i.U), acquireBucketSize(i.U), Mux(didDomainFireAcquire && newTokens > 0.U, newTokens - 1.U, newTokens))
       perfLineRefill(i.U) := Mux(perfEnable, didDomainFireAcquire + perfLineRefill(i.U), 0.U)
       perfWriteBack(i.U) := Mux(perfEnable, didDomainFireRelease + perfWriteBack(i.U), 0.U)
       
@@ -264,17 +270,30 @@ class InclusiveCache(
         printf("Domain %d reg count: %d\n", i.U, outerAcquireCount(i.U))
       }
 
-      mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal )
+      when ( enGlobal && enDomain(i.U) ) {
+        printf("Domain %d tokens are %d\n", i.U, outerAcquireTokens(i.U))
+      }
 
-      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal
+      when ( (outerAcquireTokens(i.U) === 0.U) && enGlobal && enDomain(i.U) ) {
+        printf("Throttling domain %d\n", i.U)
+      }
+
+      mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireTokens(i.U) === 0.U) && enGlobal && enDomain(i.U) )
+
+      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireTokens(i.U) === 0.U) && enGlobal && enDomain(i.U)
     }
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
 
     val periodLenRegField = RegField(periodLength.getWidth, periodLength, RegFieldDesc("periodLength", "Period length"))
 
-    val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(64, reg,
-        RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
+    val maxReadBurstRegField = acquireBucketSize.zipWithIndex.map { case (reg, i) => RegField(64, reg,
+        RegFieldDesc(s"acquireBucketSize$i", s"Max read burst for domain $i")) }
+
+    val tokensPerPeriodRegField = acquireTokenRate.zipWithIndex.map { case (reg, i) => RegField(64, reg,
+        RegFieldDesc(s"acquireTokenRate$i", s"Tokens per-period for domain $i")) }
+
+    val enDomainField = RegField(enDomain.getWidth, enDomain, RegFieldDesc("enDomain", "Per-domain reg enable"))
 
     val perfEnField = RegField(perfEnable.getWidth, perfEnable, RegFieldDesc("perfEnable", "Perf counter enable"))
 
@@ -290,7 +309,9 @@ class InclusiveCache(
     regnode.regmap(
       0x000 -> Seq(enGlobalField),
       0x008 -> Seq(periodLenRegField),
-      0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
+      0x010 -> RegFieldGroup("AcquireBucketSize", Some("Per-domain max read burst config"), maxReadBurstRegField),
+      0x030 -> RegFieldGroup("TokensPerPeriod", Some("Per-domain tokens per-period config"), tokensPerPeriodRegField),
+      0x050 -> Seq(enDomainField),
       0x650 -> Seq(perfEnField),
       0x660 -> RegFieldGroup("LineRefill", Some("Per-domain line refill count"), lineRefillRegField),
       0x680 -> RegFieldGroup("WriteBack", Some("Per-domain writeback count"), writeBackRegField),
