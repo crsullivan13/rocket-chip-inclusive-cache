@@ -27,8 +27,6 @@ import MetaData._
 import chisel3.PrintableHelper
 import chisel3.experimental.dataview._
 
-import midas.targetutils.SynthesizePrintf
-
 class ScheduleRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val a = Valid(new SourceARequest(params))
@@ -50,7 +48,6 @@ class MSHRStatus(params: InclusiveCacheParameters) extends InclusiveCacheBundle(
   val nestB  = Bool()
   val blockC = Bool()
   val nestC  = Bool()
-  val domainId = UInt(2.W)
 }
 
 class NestedWriteback(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -95,8 +92,6 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val sinkd     = Flipped(Valid(new SinkDResponse(params)))
     val sinke     = Flipped(Valid(new SinkEResponse(params)))
     val nestedwb  = Flipped(new NestedWriteback(params))
-
-    val throttle = Input(Vec(4, Bool()))
   })
 
   val request_valid = RegInit(false.B)
@@ -166,7 +161,6 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   }
 
   // Scheduler status
-  io.status.bits.domainId := request.domainId
   io.status.valid := request_valid
   io.status.bits.set    := request.set
   io.status.bits.tag    := request.tag
@@ -181,17 +175,13 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   //   acquire waiting for grant, inner release gets queued, outer probe -> inner probe -> deadlock
   // ... this is possible because the release+probe can be for same set, but different tag
 
-  // when ( io.status.valid && io.status.bits.nestC ) {
-  //   SynthesizePrintf(printf("NestC: w_rprobeackfirst %d, w_pprobeackfirst %d, w_grantfirst %d\n", !w_rprobeackfirst, !w_pprobeackfirst, !w_grantfirst))
-  // }
-
   // We can only demand: block, nest, or queue
   assert (!io.status.bits.nestB || !io.status.bits.blockB)
   assert (!io.status.bits.nestC || !io.status.bits.blockC)
 
   // Scheduler requests
   val no_wait = w_rprobeacklast && w_releaseack && w_grantlast && w_pprobeacklast && w_grantack
-  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe //&& !(io.throttle(request.domainId) && meta_valid)
+  io.schedule.bits.a.valid := !s_acquire && s_release && s_pprobe
   io.schedule.bits.b.valid := !s_rprobe || !s_pprobe
   io.schedule.bits.c.valid := (!s_release && w_rprobeackfirst) || (!s_probeack && w_pprobeackfirst)
   io.schedule.bits.d.valid := !s_execute && w_pprobeack && w_grant
@@ -201,11 +191,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.reload := no_wait
   io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
-                       io.schedule.bits.dir.valid) //&& !(io.throttle(request.domainId)) // io.schedule.bits.a.bits.domainId when setup
-
-  // when ( io.throttle(io.schedule.bits.a.bits.domainId) ) {
-  //   SynthesizePrintf(printf("MSHR throttling\n"))
-  // }
+                       io.schedule.bits.dir.valid)
 
   // Schedule completions
   when (io.schedule.ready) {
