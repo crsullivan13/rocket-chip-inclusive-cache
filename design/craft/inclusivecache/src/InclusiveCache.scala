@@ -313,6 +313,8 @@ class InclusiveCache(
     }
 
     regnode.regmap(
+      0x050 -> RegFieldGroup("DomainLLCAccess", Some("Per-domain LLC access totals"), LLCAccessCountersReg),
+      0x100 -> RegFieldGroup("DomainLLCMiss", Some("Per-domain LLC miss totals"), LLCMissCountersReg),
       0x300 -> Seq(CountInstFetchReg),
       0x308 -> RegFieldGroup("CoreInterruptEnables", Some("Per-core interrupt enables"), EnableIntRegs),
       0x400 -> RegFieldGroup("CoreBudgets", Some("Per-core budgets"), CoreBudgetRegs),
