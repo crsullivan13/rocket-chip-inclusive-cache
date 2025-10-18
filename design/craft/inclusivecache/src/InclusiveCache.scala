@@ -215,6 +215,7 @@ class InclusiveCache(
       or if there is a new period and we must interrupt to let it get rid of the throttle task
     */
     println(s"CACHE COUNTER intSrc.out.size = ${intSrc.out.length}, intSrc.out(0).size = ${intSrc.out(0)._1.length}")
+    val (intOut, _) = intSrc.out(0) // does this need to be i as well? --> that causes an error
     for (i <- 0 until cache.numCPUs)
     {
         val overBudget = MissCounters(i) >= CoreBudgets(i) && EnableInterrupt(i)        // we should take this out to do 1ms regulation
@@ -223,8 +224,11 @@ class InclusiveCache(
         {
           hasInterrupted(i) := coreDoInterrupt(i) || hasInterrupted(i)
         } 
-        val (intOut, _) = intSrc.out(0) // does this need to be i as well? --> that causes an error
+        
         intOut(i) := coreDoInterrupt(i)
+        when ( intOut(i) ) {
+          printf("INT SRC %d firing\n", i.U);
+        }
 
     }
 
