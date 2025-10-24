@@ -67,7 +67,7 @@ class SourceA(params: InclusiveCacheParameters) extends Module
     val a = domainAs(i)
     val buffer = domainBuffs(i)
 
-    val buffHeadDramBankTarget = ( buffer.deq.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
+    val buffHeadDramBankTarget = ( buffer.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
     val shouldThrottle = io.throttle(i).dramBank(buffHeadDramBankTarget)
 
     io.domainReadys(i) := a.ready
