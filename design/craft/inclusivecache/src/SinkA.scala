@@ -99,8 +99,8 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   params.ccover(a.valid && buf_block, "SINKA_BUF_STALL", "No space in putbuffer for beat")
   params.ccover(a.valid && set_block, "SINKA_SET_STALL", "No space in putbuffer for request")
 
-  val ignore = Wire(UInt(0, width = params.inner.bundle.sourceBits))
-  ignore := ~UInt(0, width = params.inner.bundle.sourceBits)
+  val ignore = Wire(UInt(params.inner.bundle.sourceBits.W))
+  ignore := ~0.U(params.inner.bundle.sourceBits.W)
   dontTouch(ignore)
 
   val are_we_ignoring = a.bits.source =/= ignore
@@ -114,9 +114,9 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   val (tag, set, offset) = params.parseAddress(a.bits.address)
   val put = Mux(first, freeIdx, RegEnable(freeIdx, first))
 
-  io.req.bits.prio   := Vec(UInt(1, width=3).asBools)
-  io.req.bits.control:= Bool(false)
-  io.req.bits.control1 := Bool(false)
+  io.req.bits.prio   := VecInit(1.U(3.W).asBools)
+  io.req.bits.control:= false.B
+  io.req.bits.control1 := false.B
   io.req.bits.opcode := a.bits.opcode
   io.req.bits.param  := a.bits.param
   io.req.bits.size   := a.bits.size

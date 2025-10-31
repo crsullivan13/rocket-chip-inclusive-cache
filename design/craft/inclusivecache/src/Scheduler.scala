@@ -358,29 +358,29 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val mshr_insertOH = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>
     when (request.valid && alloc && s && !mshr_uses_directory_assuming_no_bypass) {
-      m.io.allocate.valid := Bool(true)
+      m.io.allocate.valid := true.B
       m.io.allocate.bits := request.bits
-      m.io.allocate.bits.repeat := Bool(false)
-      m.io.allocate.bits.from_buffer := Bool(false)
+      m.io.allocate.bits.repeat := false.B
+      m.io.allocate.bits.from_buffer := false.B
     }
   }
   
   dontTouch(request)
 
   when (request.valid && nestB && !bc_mshr.io.status.valid && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
-    bc_mshr.io.allocate.valid := Bool(true)
+    bc_mshr.io.allocate.valid := true.B
     bc_mshr.io.allocate.bits := request.bits
-    bc_mshr.io.allocate.bits.repeat := Bool(false)
-    bc_mshr.io.allocate.bits.from_buffer := Bool(false)
+    bc_mshr.io.allocate.bits.repeat := false.B
+    bc_mshr.io.allocate.bits.from_buffer := false.B
     assert (!request.bits.prio(0))
   }
   bc_mshr.io.allocate.bits.prio(0) := false.B
 
   when (request.valid && nestC && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
-    c_mshr.io.allocate.valid := Bool(true)
+    c_mshr.io.allocate.valid := true.B
     c_mshr.io.allocate.bits := request.bits
-    c_mshr.io.allocate.bits.repeat := Bool(false)
-    c_mshr.io.allocate.bits.from_buffer := Bool(false)
+    c_mshr.io.allocate.bits.repeat := false.B
+    c_mshr.io.allocate.bits.from_buffer := false.B
     assert (!request.bits.prio(0))
     assert (!request.bits.prio(1))
   }
@@ -396,7 +396,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   }
 
   // val way_valid_counter = Counter(8)
-  val temp_way = Wire(UInt(width = params.wayBits))
+  val temp_way = Wire(UInt(params.wayBits.W))
   when(forward_directory_to_sinkc) {
     temp_way := directory.io.result.bits.way
   }
@@ -411,7 +411,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
             abc_mshrs.map(_.io.status.bits.way))))
   val s0_way_valid = mshrs.map(m => m.io.status.valid && (m.io.status.bits.set === sinkC.io.set) && (m.io.status.bits.tag === sinkC.io.tag)).reduce(_||_)
   val s1_way_valid = RegNext(s0_way_valid)
-  sinkC.io.way_valid := Mux(forward_directory_to_sinkc, Bool(true), Mux(s0_way_valid, s1_way_valid, s0_way_valid))
+  sinkC.io.way_valid := Mux(forward_directory_to_sinkc, true.B, Mux(s0_way_valid, s1_way_valid, s0_way_valid))
   sinkD.io.way := Vec(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := Vec(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 

@@ -92,7 +92,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module
   val s1_mask = MaskGen(s1_req.offset, s1_req.size, beatBytes, writeBytes) & ~s1_bypass
   val s1_grant = (s1_req.opcode === AcquireBlock && s1_req.param === BtoT) || s1_req.opcode === AcquirePerm
   val s1_need_r = s1_mask.orR && s1_req.prio(0) && s1_req.opcode =/= Hint && !s1_grant &&
-                  (s1_req.opcode =/= PutFullData || s1_req.size < UInt(log2Ceil(writeBytes))) &&
+                  (s1_req.opcode =/= PutFullData || s1_req.size < log2Ceil(writeBytes).U) &&
                   s1_req.opcode =/= ProbeAckData
   val s1_valid_r = (busy || io.req.valid) && s1_need_r && !s1_block_r
   val s1_need_pb = Mux(s1_req.prio(0), !s1_req.opcode(2), s1_req.opcode(0)) // hasData
@@ -222,7 +222,7 @@ class SourceD(params: InclusiveCacheParameters) extends Module
 
   d.valid := s3_valid_d
   d.bits.opcode  := Mux(s3_req.prio(0), Mux(s3_req.control, ReleaseAck, resp_opcode(s3_req.opcode)), ReleaseAck)
-  d.bits.param   := Mux(s3_req.prio(0) && s3_acq, Mux(s3_req.param =/= NtoB, toT, toB), Mux(s3_req.control, RootRelease, UInt(0)))
+  d.bits.param   := Mux(s3_req.prio(0) && s3_acq, Mux(s3_req.param =/= NtoB, toT, toB), Mux(s3_req.control, RootRelease, 0.U))
   d.bits.size    := s3_req.size
   d.bits.source  := s3_req.source
   d.bits.sink    := s3_req.sink
