@@ -412,8 +412,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val s0_way_valid = mshrs.map(m => m.io.status.valid && (m.io.status.bits.set === sinkC.io.set) && (m.io.status.bits.tag === sinkC.io.tag)).reduce(_||_)
   val s1_way_valid = RegNext(s0_way_valid)
   sinkC.io.way_valid := Mux(forward_directory_to_sinkc, true.B, Mux(s0_way_valid, s1_way_valid, s0_way_valid))
-  sinkD.io.way := Vec(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
-  sinkD.io.set := Vec(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
+  sinkD.io.way := VecInit(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
+  sinkD.io.set := VecInit(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 
   // wire MSHRs to sinkC bs_adr fire
   for (i <- 0 until params.mshrs) {

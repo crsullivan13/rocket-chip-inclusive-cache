@@ -640,7 +640,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
       assert (new_meta.hit)
     }
     // For X channel requests (ie: flush)
-    .elsewhen (new_request.control && Bool(params.control)) { // new_request.prio(0)
+    .elsewhen (new_request.control && params.control.B) { // new_request.prio(0)
       s_flush := false.B
       s_execute := false.B
       meta.dirty := true.B
@@ -649,7 +649,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         s_release := false.B
         w_releaseack := false.B
         // Do we need to shoot-down inner caches?
-        when (Bool(!params.firstLevel) && 
+        when (!params.firstLevel.B && 
               (new_meta.clients & ~new_skipProbe) =/= 0.U) {
           s_rprobe := false.B
           w_rprobeackfirst := false.B
