@@ -200,6 +200,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.req.bits.put    := put
     io.req.bits.domainId := c.bits.domainId
 
+    io.opcode := io.req.bits.opcode
+    io.req.bits.from_buffer := false.B
+
     io.bs_set := io.bs_adr.bits.set
 
     putbuffer.io.push.bits.index := put

@@ -126,6 +126,7 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   io.req.bits.tag    := tag
   io.req.bits.put    := put
   io.req.bits.domainId := a.bits.domainId
+  io.req.bits.from_buffer := false.B
 
   putbuffer.io.push.bits.index := put
   putbuffer.io.push.bits.data.data    := a.bits.data

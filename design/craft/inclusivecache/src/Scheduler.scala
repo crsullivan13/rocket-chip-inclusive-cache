@@ -359,7 +359,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>
     when (request.valid && alloc && s && !mshr_uses_directory_assuming_no_bypass) {
       m.io.allocate.valid := true.B
-      m.io.allocate.bits := request.bits
+      m.io.allocate.bits.viewAsSupertype(chiselTypeOf(request.bits)) := request.bits
       m.io.allocate.bits.repeat := false.B
       m.io.allocate.bits.from_buffer := false.B
     }
@@ -369,7 +369,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   when (request.valid && nestB && !bc_mshr.io.status.valid && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
     bc_mshr.io.allocate.valid := true.B
-    bc_mshr.io.allocate.bits := request.bits
+    bc_mshr.io.allocate.bits.viewAsSupertype(chiselTypeOf(request.bits)) := request.bits
     bc_mshr.io.allocate.bits.repeat := false.B
     bc_mshr.io.allocate.bits.from_buffer := false.B
     assert (!request.bits.prio(0))
@@ -378,7 +378,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   when (request.valid && nestC && !c_mshr.io.status.valid && !mshr_uses_directory_assuming_no_bypass) {
     c_mshr.io.allocate.valid := true.B
-    c_mshr.io.allocate.bits := request.bits
+    c_mshr.io.allocate.bits.viewAsSupertype(chiselTypeOf(request.bits)) := request.bits
     c_mshr.io.allocate.bits.repeat := false.B
     c_mshr.io.allocate.bits.from_buffer := false.B
     assert (!request.bits.prio(0))
@@ -397,6 +397,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // val way_valid_counter = Counter(8)
   val temp_way = Wire(UInt(params.wayBits.W))
+  temp_way := 0.U
   when(forward_directory_to_sinkc) {
     temp_way := directory.io.result.bits.way
   }
