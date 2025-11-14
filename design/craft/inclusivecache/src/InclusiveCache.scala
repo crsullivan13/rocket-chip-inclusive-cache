@@ -73,7 +73,7 @@ class InclusiveCache(
     device = regulationDevice,
     beatBytes = 8)
 
-  val dramRegNode = BundleBridgeSource(() => new BRUTileIO(4)) // TODO make number of domains one parameter everywhere
+  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 8)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -164,7 +164,7 @@ class InclusiveCache(
     val dramBankOffset = 16
 
     val perfEnable = RegInit(false.B)
-    val perfLineRefill = Reg(Vec(nDomains, UInt(64.W)))
+    val perfLineRefill = Seq.fill(2)(Reg(Vec(nDramBanks, UInt(64.W))))
     val perfWriteBack = Reg(Vec(nDomains, UInt(64.W)))
     val perfSinkAStall = Reg(Vec(nDomains, UInt(64.W)))
     val perfMSHRHeadStall = Reg(UInt(64.W))
@@ -268,13 +268,19 @@ class InclusiveCache(
       for ( j <- 0 until nDramBanks ) {
         val didTargetBank = activeAcquireDomains.map{ case (_, bank) => bank === j.U }.reduce(_||_) && didDomainFireAcquire
         outerAcquireCount(i)(j) := Mux(periodReset || !enGlobal, 0.U + didTargetBank, didTargetBank + outerAcquireCount(i)(j))
-        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := ( (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal ) )
+        
+        if ( i < 2 ) {
+          perfLineRefill(i)(j) := Mux(perfEnable, didTargetBank + perfLineRefill(i)(j), 0.U)
+        }
+
+        val throttleBit = (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal
+        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := throttleBit )
+        dramRegNode.bundle.nThrottle(i)(j) := throttleBit
       }
 
-      perfLineRefill(i.U) := Mux(perfEnable, didDomainFireAcquire + perfLineRefill(i.U), 0.U)
       perfWriteBack(i.U) := Mux(perfEnable, didDomainFireRelease + perfWriteBack(i.U), 0.U)
 
-      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i)(0.U) >= acquireBudget(i.U)) && enGlobal
+      //dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i)(0.U) >= acquireBudget(i.U)) && enGlobal
     }
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
@@ -286,14 +292,18 @@ class InclusiveCache(
 
     val perfEnField = RegField(perfEnable.getWidth, perfEnable, RegFieldDesc("perfEnable", "Perf counter enable"))
 
-    val lineRefillRegField = perfLineRefill.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
-        RegFieldDesc(s"lineRefill$i", s"Line refill count for domain $i")) }
+    val lineRefillRegField = perfLineRefill.zipWithIndex.flatMap { case (domainRegs, i) =>
+      domainRegs.zipWithIndex.map { case (bankReg, j) =>
+        RegField.r(bankReg.getWidth, bankReg,
+          RegFieldDesc(s"lineRefill${i}_${j}", s"Line refill count for domain $i bank $j"))
+      }
+    }
 
-    val writeBackRegField = perfWriteBack.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
-        RegFieldDesc(s"writeBack$i", s"Write back count for domain $i")) }
+    // val writeBackRegField = perfWriteBack.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
+    //     RegFieldDesc(s"writeBack$i", s"Write back count for domain $i")) }
 
-    val sinkAStallRegField = perfSinkAStall.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
-        RegFieldDesc(s"sinkAStall$i", s"Sink A stall cycles for domain $i")) }
+    // val sinkAStallRegField = perfSinkAStall.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
+    //     RegFieldDesc(s"sinkAStall$i", s"Sink A stall cycles for domain $i")) }
 
     val mshrHeadBlockRegField = RegField(perfMSHRHeadStall.getWidth, perfMSHRHeadStall, RegFieldDesc("perfMSHRHeadStall", "Perf mshr head stall"))
 
@@ -302,10 +312,8 @@ class InclusiveCache(
       0x008 -> Seq(periodLenRegField),
       0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
       0x650 -> Seq(perfEnField),
-      0x660 -> RegFieldGroup("LineRefill", Some("Per-domain line refill count"), lineRefillRegField),
-      0x680 -> RegFieldGroup("WriteBack", Some("Per-domain writeback count"), writeBackRegField),
-      0x700 -> RegFieldGroup("SinkAStall", Some("Per-domain sinkA stall cycle count"), sinkAStallRegField),
-      0x720 -> Seq(mshrHeadBlockRegField),
+      0x660 -> Seq(mshrHeadBlockRegField),
+      0x670 -> RegFieldGroup("LineRefill", Some("Per-domain line refill count"), lineRefillRegField),
     )
 
     ctrls.foreach { ctrl =>
@@ -333,4 +341,3 @@ class InclusiveCache(
     def json = s"""{"banks":[${mods.map(_.json).mkString(",")}]}"""
   }
 }
-
