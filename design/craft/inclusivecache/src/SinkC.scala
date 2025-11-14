@@ -54,9 +54,6 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     // SourceD sideband
     val rel_pop  = Flipped(Decoupled(new PutBufferPop(params)))
     val rel_beat = new PutBufferCEntry(params)
-
-    val perfEnable = Input(Bool())
-    val perfStall = Output(new PerfEventInfo())
   })
 
   if (params.firstLevel) {
@@ -135,13 +132,6 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     params.ccover(c.valid && !raw_resp && req_block, "SINKC_REQ_STALL", "No MSHR available to sink request")
     params.ccover(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
     params.ccover(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
-
-    io.perfStall.didEventOccur := false.B
-    io.perfStall.domainId := 4.U
-    when ( c.valid && !raw_resp && ( req_block || buf_block || set_block ) ) {
-      io.perfStall.didEventOccur := true.B
-      io.perfStall.domainId := c.bits.domainId
-    }
 
     c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
 

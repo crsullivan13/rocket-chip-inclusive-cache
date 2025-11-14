@@ -39,11 +39,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     val resp = Decoupled(new SourceXRequest(params))
 
     val throttle = Input(Vec(4, new ThrottleBundle()))
-    val mshrHeadBlock = Output(Bool())
-    //val outerAcquireInfo = Output(new OuterAcquireInfo())
-
-    val perfEnable = Input(Bool())
-    val perfEvents = Output(new PerfEvents())
   })
 
   val sourceA = Module(new SourceA(params))
@@ -70,11 +65,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val sinkX = Module(new SinkX(params))
 
   sinkA.io.a <> io.in.a
-  sinkA.io.perfEnable := io.perfEnable
-  io.perfEvents.sinkAStall := sinkA.io.perfStall
   sinkC.io.c <> io.in.c
-  sinkC.io.perfEnable := io.perfEnable
-  io.perfEvents.sinkCStall := sinkC.io.perfStall
   sinkE.io.e <> io.in.e
   sinkD.io.d <> io.out.d
   sinkX.io.x <> io.req
@@ -319,18 +310,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
   directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
-
-  io.mshrHeadBlock := false.B
-  when ( requests.io.push.valid ) {
-    val mshrQueuedTo = OHToUInt(lowerMatches1)
-    io.mshrHeadBlock := mshrs.zipWithIndex.map{ case(m,i) =>
-      val mshrDramBankTarget = ( params.expandAddress(m.io.schedule.bits.a.bits.tag, m.io.schedule.bits.a.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-      val requestDramBankTarget = ( params.expandAddress(request.bits.tag, request.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-      val shouldThrottle = io.throttle(m.io.schedule.bits.a.bits.domainId).dramBank(mshrDramBankTarget)
-
-      ( i.U === mshrQueuedTo ) && ( mshrDramBankTarget =/= requestDramBankTarget ) && shouldThrottle
-    }.reduce(_||_)
-  }
 
   // Enqueue the request if not bypassed directly into an MSHR
   requests.io.push.valid := request.valid && queue && !bypassQueue
