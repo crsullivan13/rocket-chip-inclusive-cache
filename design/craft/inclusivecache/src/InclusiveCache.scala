@@ -158,7 +158,6 @@ class InclusiveCache(
       println("")
     }
 
-    val perBankEvent = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, new PerfEventInfo()))
     val nDomains = 4
     val nDramBanks = 8
     val dramBankOffset = 16
