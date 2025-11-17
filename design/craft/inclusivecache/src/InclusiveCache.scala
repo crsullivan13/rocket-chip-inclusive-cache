@@ -58,7 +58,7 @@ class InclusiveCache(
     device = regulationDevice,
     beatBytes = 8)
 
-  val dramRegNode = BundleBridgeSource(() => new BRUTileIO(4)) // TODO make number of domains one parameter everywhere, doesn't do anything
+  //val dramRegNode = BundleBridgeSource(() => new BRUTileIO(4)) // TODO make number of domains one parameter everywhere, doesn't do anything
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -132,7 +132,14 @@ class InclusiveCache(
     val bundleParamsIn = node.in(0)._2.bundle
     val bundleParamsOut = node.out(0)._2.bundle
     val membase =  p(ExtMem).get.master.base
-    val nBanks = p(SubsystemBankedCoherenceKey).nBanks
+    
+    val nLLCBanks = p(SubsystemBankedCoherenceKey).nBanks
+    val llcBankOffset = 6
+    val llcBankMask = nLLCBanks - 1
+
+    val nDramBanks = 8
+    val dramBankOffset = 16
+    val dramBankMask = nDramBanks - 1
 
     // If you have a control port, you must have at least one cache port
     require (ctrls.isEmpty || !node.edges.in.isEmpty)
@@ -150,87 +157,29 @@ class InclusiveCache(
       println("")
     }
 
-/*
-      Performance Counters that we added
-    */
+    // Memguard
     val countInstFetch = RegInit(true.B)
     val AccessCounterReset = RegInit(false.B)
     val EnableInterrupt = Seq.fill(cache.numCPUs)(RegInit(false.B))
  
-    /*
-        Per-CacheBank counters
-    */
-    val PerBankMissCounters =  Seq.fill(nBanks)(RegInit(VecInit(Seq.fill(cache.numCPUs)(0.U(64.W)))))
-    val PerBankAccessCounters = Seq.fill(nBanks)(RegInit(VecInit(Seq.fill(cache.numCPUs)(0.U(64.W)))))
+    // per-core, per-bank counters
+    val PerLLCBankCounters = Seq.fill(cache.numCPUs)(RegInit(VecInit(Seq.fill(nLLCBanks)(0.U(64.W)))))
+    val PerDRAMBankCounters =  Seq.fill(cache.numCPUs)(RegInit(VecInit(Seq.fill(nDramBanks)(0.U(64.W)))))
  
-    // Per-CPU counters
-    val MissCounters = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
-    val AccessCounters = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
+    // // Per-CPU counters
+    // val MissCounters = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
+    // val AccessCounters = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
 
     // Per-CPU Regulation Budgets
-    val CoreBudgets = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
+    val CoreLLCBudgets = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
+    val CoreDRAMBudgets = Seq.fill(cache.numCPUs)(RegInit(0.U(64.W)))
 
     // only interrupt the core once per period
     val hasInterrupted = Seq.fill(cache.numCPUs)(RegInit(false.B))
     val coreDoInterrupt = Seq.fill(cache.numCPUs)(WireInit(false.B))
 
     // val memguardPeriodCntr = Reg(UInt(25.W))
-    val memguardPeriodCntrReset = VecInit(Seq.fill(cache.numCPUs)(RegInit(false.B)))
-
-    for (j <- 0 until cache.numCPUs)
-    {
-      when (memguardPeriodCntrReset(j)) // Reset all
-      {
-          for (i <- 0 until nBanks)
-          {
-              PerBankAccessCounters(i)(j) := 0.U
-              PerBankMissCounters(i)(j) := 0.U
-          }
-
-          MissCounters(j) := 0.U
-          AccessCounters(j) := 0.U
-          hasInterrupted(j) := false.B
-
-      }
-      .otherwise // Calculate per core total accesses
-      {
-            val tmpSumMiss = VecInit(Seq.fill(nBanks)(0.U(64.W)))
-            val tmpSumAccess = VecInit(Seq.fill(nBanks)(0.U(64.W)))
-            tmpSumMiss(0) := PerBankMissCounters(0)(j)
-            tmpSumAccess(0) := PerBankAccessCounters(0)(j)
-            for (i <- 1 until nBanks)
-            {
-              tmpSumMiss(i) := PerBankMissCounters(i)(j) + tmpSumMiss(i-1)
-              tmpSumAccess(i) := PerBankAccessCounters(i)(j) + tmpSumAccess(i-1)
-            }
-
-            MissCounters(j) := tmpSumMiss(nBanks - 1)
-            AccessCounters(j) := tmpSumAccess(nBanks- 1)
-
-      }
-    }
-
-    /* 
-      Core will generate an interrupt if it is over budget and it is the first interrupt,
-      or if there is a new period and we must interrupt to let it get rid of the throttle task
-    */
-    println(s"CACHE COUNTER intSrc.out.size = ${intSrc.out.length}, intSrc.out(0).size = ${intSrc.out(0)._1.length}")
-    val (intOut, _) = intSrc.out(0) // does this need to be i as well? --> that causes an error
-    for (i <- 0 until cache.numCPUs)
-    {
-        val overBudget = MissCounters(i) >= CoreBudgets(i) && EnableInterrupt(i)        // we should take this out to do 1ms regulation
-        coreDoInterrupt(i) := (overBudget && EnableInterrupt(i) && !hasInterrupted(i)) //|| (hasInterrupted(i) && periodCntrReset)
-        when (!memguardPeriodCntrReset(i)) // do not drive signal twice
-        {
-          hasInterrupted(i) := coreDoInterrupt(i) || hasInterrupted(i)
-        } 
-        
-        intOut(i) := coreDoInterrupt(i)
-        when ( intOut(i) ) {
-          printf("INT SRC %d firing\n", i.U);
-        }
-
-    }
+    val memguardPeriodReset = VecInit(Seq.fill(cache.numCPUs)(RegInit(false.B)))
 
     // Create the L2 Banks
     val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
@@ -246,36 +195,36 @@ class InclusiveCache(
       val params = InclusiveCacheParameters(cache, micro, !ctrls.isEmpty, edgeIn, edgeOut)
       val scheduler = Module(new InclusiveCacheBankScheduler(params)).suggestName("inclusive_cache_bank_sched")
 
-      /*Performance Counters*/
-      val inDomainID = Mux(in.a.fire, in.a.bits.domainId, Mux(in.c.fire, in.c.bits.domainId, 0.U))
-      val outDomainID = Mux(scheduler.io.out.a.fire, scheduler.io.out.a.bits.domainId, Mux(scheduler.io.out.c.fire, scheduler.io.out.c.bits.domainId, 0.U))
-      val aIsAcquire = in.a.bits.opcode === TLMessages.AcquireBlock
-      val aIsInstFetch = in.a.bits.opcode === TLMessages.Get && in.a.bits.address >= membase.U
-      val aIsRead = aIsAcquire || (aIsInstFetch && countInstFetch)
-      val aIsWrite = (in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData) && in.a.bits.address >= membase.U
-      val cIsWb = in.c.bits.opcode === TLMessages.ReleaseData || in.c.bits.opcode === TLMessages.ProbeAckData
-      val outaIsAcquire = scheduler.io.out.a.bits.opcode === TLMessages.AcquireBlock
-      val outaIsInstFetch = scheduler.io.out.a.bits.opcode === TLMessages.Get && scheduler.io.out.a.bits.address >= membase.U
-      val outCIsWb =  in.c.bits.opcode === TLMessages.ReleaseData || in.c.bits.opcode === TLMessages.ProbeAckData
-      val isMiss = (outaIsAcquire || (outaIsInstFetch && countInstFetch)) && scheduler.io.out.a.fire
-      val isWbToDRAM = (outCIsWb && edgeOut.last(scheduler.io.out.c))
-      val toDRAM = (outaIsAcquire || (outaIsInstFetch && countInstFetch)) && scheduler.io.out.a.fire
-      val isAccess = ((aIsWrite || aIsRead || (aIsInstFetch && countInstFetch)) && in.a.fire) || (cIsWb && in.c.fire) 
-      when (!memguardPeriodCntrReset(outDomainID))
-      {
-          when (toDRAM)
-          {
-              PerBankMissCounters(i)(outDomainID)  := PerBankMissCounters(i)(outDomainID) + 1.U
-          }
-      }
+      // /*Performance Counters*/
+      // val inDomainID = Mux(in.a.fire, in.a.bits.domainId, Mux(in.c.fire, in.c.bits.domainId, 0.U))
+      // val outDomainID = Mux(scheduler.io.out.a.fire, scheduler.io.out.a.bits.domainId, Mux(scheduler.io.out.c.fire, scheduler.io.out.c.bits.domainId, 0.U))
+      // val aIsAcquire = in.a.bits.opcode === TLMessages.AcquireBlock
+      // val aIsInstFetch = in.a.bits.opcode === TLMessages.Get && in.a.bits.address >= membase.U
+      // val aIsRead = aIsAcquire || (aIsInstFetch && countInstFetch)
+      // val aIsWrite = (in.a.bits.opcode === TLMessages.PutFullData || in.a.bits.opcode === TLMessages.PutPartialData) && in.a.bits.address >= membase.U
+      // val cIsWb = in.c.bits.opcode === TLMessages.ReleaseData || in.c.bits.opcode === TLMessages.ProbeAckData
+      // val outaIsAcquire = scheduler.io.out.a.bits.opcode === TLMessages.AcquireBlock
+      // val outaIsInstFetch = scheduler.io.out.a.bits.opcode === TLMessages.Get && scheduler.io.out.a.bits.address >= membase.U
+      // val outCIsWb =  in.c.bits.opcode === TLMessages.ReleaseData || in.c.bits.opcode === TLMessages.ProbeAckData
+      // val isMiss = (outaIsAcquire || (outaIsInstFetch && countInstFetch)) && scheduler.io.out.a.fire
+      // val isWbToDRAM = (outCIsWb && edgeOut.last(scheduler.io.out.c))
+      // val toDRAM = (outaIsAcquire || (outaIsInstFetch && countInstFetch)) && scheduler.io.out.a.fire
+      // val isAccess = ((aIsWrite || aIsRead || (aIsInstFetch && countInstFetch)) && in.a.fire) || (cIsWb && in.c.fire) 
+      // when (!memguardPeriodReset(outDomainID))
+      // {
+      //     when (toDRAM)
+      //     {
+      //         PerBankMissCounters(i)(outDomainID)  := PerBankMissCounters(i)(outDomainID) + 1.U
+      //     }
+      // }
 
-      when (!memguardPeriodCntrReset(inDomainID))
-      {
-          when (isAccess)
-          {
-              PerBankAccessCounters(i)(inDomainID) := PerBankAccessCounters(i)(inDomainID) + 1.U
-          }
-      }
+      // when (!memguardPeriodReset(inDomainID))
+      // {
+      //     when (isAccess)
+      //     {
+      //         PerBankAccessCounters(i)(inDomainID) := PerBankAccessCounters(i)(inDomainID) + 1.U
+      //     }
+      // }
 
       scheduler.io.in <> in
       out <> scheduler.io.out
@@ -297,31 +246,114 @@ class InclusiveCache(
       scheduler
     }
 
-    // Memguard
-    val LLCAccessCountersReg = AccessCounters.zipWithIndex.map{ case (reg, i) => 
-        RegField.r(64, reg, RegFieldDesc(s"LLCAccessCounterReg${i}", s"Total LLC accesses for domainId=${i}"))
+    val activeDRAMAcquireCores = mods.map( sched => {
+      val didBankFireAcquire = sched.io.out.a.fire
+      val firedCore = WireDefault(cache.numCPUs.U)
+      val bankTarget = WireDefault(nDramBanks.U)
+
+      when ( didBankFireAcquire ) {
+        firedCore := sched.io.out.a.bits.domainId
+        bankTarget := ( sched.io.out.a.bits.address >> dramBankOffset ) & dramBankMask.U
+      }
+
+      (firedCore: UInt, bankTarget: UInt)
+    })
+
+    val activeLLCAcquireCores = mods.map( sched => {
+      val didBankRecieveAcquire = sched.io.in.a.fire
+      val firedCore = WireDefault(cache.numCPUs.U)
+      val bankTarget = WireDefault(nLLCBanks.U)
+
+      when ( didBankRecieveAcquire ) {
+        firedCore := sched.io.in.a.bits.domainId
+        bankTarget := ( sched.io.in.a.bits.address >> llcBankOffset ) & llcBankMask.U
+      }
+
+      (firedCore: UInt, bankTarget: UInt)
+    })
+
+    for (i <- 0 until cache.numCPUs) {
+      when (memguardPeriodReset(i)) { // Reset All
+        for (j <- 0 until nLLCBanks) {
+          PerLLCBankCounters(i)(j) := 0.U
+        }
+
+        for (j <- 0 until nDramBanks) {
+          PerDRAMBankCounters(i)(j) := 0.U
+        }
+
+        hasInterrupted(i) := false.B
+      } .otherwise { // Calculate per core total accesses 
+        val didCoreFireAcquire = activeDRAMAcquireCores.map{ case (core,_) => core === i.U }.reduce(_||_)
+
+        for (j <- 0 until nLLCBanks) {
+          val didTargetBank = activeLLCAcquireCores.map{ case (_, bank) => bank === j.U}.reduce(_||_) && didCoreFireAcquire
+          PerLLCBankCounters(i)(j) := PerLLCBankCounters(i)(j) + didTargetBank
+        }
+
+        for (j <- 0 until nDramBanks) {
+          val didTargetBank = activeDRAMAcquireCores.map{ case (_, bank) => bank === j.U}.reduce(_||_) && didCoreFireAcquire
+          PerDRAMBankCounters(i)(j) := PerDRAMBankCounters(i)(j) + didTargetBank
+        }
+      }
     }
 
-    val LLCMissCountersReg = MissCounters.zipWithIndex.map{ case (reg, i) =>
-        RegField.r(64, reg, RegFieldDesc(s"LLCMissCounterReg${i}", s"Total LLC misses for domainId=${i}"))
+    /* 
+      Core will generate an interrupt if it is over budget and it is the first interrupt,
+      or if there is a new period and we must interrupt to let it get rid of the throttle task
+    */
+    println(s"CACHE COUNTER intSrc.out.size = ${intSrc.out.length}, intSrc.out(0).size = ${intSrc.out(0)._1.length}")
+    val (intOut, _) = intSrc.out(0)
+    for (i <- 0 until cache.numCPUs) {
+        val overDRAMBudget = PerDRAMBankCounters(i).map( cntr => cntr >= CoreDRAMBudgets(i) ).reduce(_||_)
+        coreDoInterrupt(i) := (overDRAMBudget && EnableInterrupt(i) && !hasInterrupted(i))
+        when (!memguardPeriodReset(i)) { // do not drive signal twice
+          hasInterrupted(i) := coreDoInterrupt(i) || hasInterrupted(i)
+        } 
+        
+        intOut(i) := coreDoInterrupt(i)
     }
+
+    // Memguard
+    // val LLCAcessCounterRegs = PerLLCBankCounters.zipWithIndex.flatMap{ case (coreRegs, i) => 
+    //   coreRegs.zipWithIndex.map{ case (bankReg, j) =>
+    //     RegField.r(bankReg.getWidth, bankReg,
+    //       RegFieldDesc(s"llcAccess${i}_${j}", s"LLC access count for core $i bank $j"))
+    //   }  
+    // }
+
+    // val LLCMissCounterRegs = PerDRAMBankCounters.zipWithIndex.flatMap{ case (coreRegs, i) => 
+    //   coreRegs.zipWithIndex.map{ case (bankReg, j) =>
+    //     RegField.r(bankReg.getWidth, bankReg,
+    //       RegFieldDesc(s"llcMiss${i}_${j}", s"LLC miss count for core $i bank $j"))
+    //   }  
+    // }
+
     val CountInstFetchReg = RegField(countInstFetch.getWidth, countInstFetch, RegFieldDesc("countInstFetch", "Bool count instruction fetches in access counters"))
+
     val EnableIntRegs = EnableInterrupt.zipWithIndex.map { case (reg, i) =>
         RegField(64, reg, RegFieldDesc(s"EnableInterruptCore${i}", s"EnableInterruptsCore"))
-    } 
-    val CoreBudgetRegs = CoreBudgets.zipWithIndex.map { case (reg, i) => 
-        RegField(64, reg, RegFieldDesc(s"CoreBudgetCore${i}", s"CoreBudget"))
     }
-    val PeriodResetRegs = memguardPeriodCntrReset.zipWithIndex.map{ case (reg, i) => 
+
+    val CoreLLCBudgetRegs = CoreLLCBudgets.zipWithIndex.map { case (reg, i) => 
+        RegField(64, reg, RegFieldDesc(s"CoreLLCBudgetCore${i}", s"CoreLLCBudget"))
+    }
+  
+    val CoreDRAMBudgetRegs = CoreDRAMBudgets.zipWithIndex.map { case (reg, i) => 
+        RegField(64, reg, RegFieldDesc(s"CoreDRAMBudgetCore${i}", s"CoreDRAMBudget"))
+    }
+  
+    val PeriodResetRegs = memguardPeriodReset.zipWithIndex.map{ case (reg, i) => 
         RegField(64, reg, RegFieldDesc(s"PeriodLength${i}", s"PeriodLength${i}"))
     }
 
     regnode.regmap(
-      0x050 -> RegFieldGroup("DomainLLCAccess", Some("Per-domain LLC access totals"), LLCAccessCountersReg),
-      0x100 -> RegFieldGroup("DomainLLCMiss", Some("Per-domain LLC miss totals"), LLCMissCountersReg),
+      // 0x050 -> RegFieldGroup("CoreLLCAccess", Some("Per-core LLC access totals"), LLCAcessCounterRegs),
+      // 0x100 -> RegFieldGroup("CoreLLCMiss", Some("Per-core LLC miss totals"), LLCMissCounterRegs),
       0x300 -> Seq(CountInstFetchReg),
       0x308 -> RegFieldGroup("CoreInterruptEnables", Some("Per-core interrupt enables"), EnableIntRegs),
-      0x400 -> RegFieldGroup("CoreBudgets", Some("Per-core budgets"), CoreBudgetRegs),
+      0x400 -> RegFieldGroup("CoreLLCBudgets", Some("Per-core LLC budgets"), CoreLLCBudgetRegs),
+      0x450 -> RegFieldGroup("CoreDRAMBudgets", Some("Per-core DRAM budgets"), CoreDRAMBudgetRegs),
       0x500 -> RegFieldGroup("PeriodMemguard", Some("Memguard period lengths"), PeriodResetRegs),
     )
 
