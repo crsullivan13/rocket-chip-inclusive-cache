@@ -34,7 +34,9 @@ case class CacheParameters(
   blockBytes:  Int,
   beatBytes:   Int, // inner
   hintsSkipProbe: Boolean,
-  numCPUs: Int)
+  nDomains: Int,
+  nDramBanks: Int,
+  dramBankOffset: Int)
 {
   require (ways > 0)
   require (sets > 0)

@@ -23,7 +23,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 
-import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey}
+import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey, BRUKey}
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
@@ -158,9 +158,20 @@ class InclusiveCache(
       println("")
     }
 
-    val nDomains = 4
-    val nDramBanks = 8
-    val dramBankOffset = 16
+    val nDomains = p(BRUKey) match {
+      case Some(params) => params.nDomains
+      case None => cache.nDomains
+    }
+
+    val nDramBanks = p(BRUKey) match {
+      case Some(params) => params.nDramBanks
+      case None => cache.nDramBanks
+    }
+
+    val dramBankOffset = p(BRUKey) match {
+      case Some(params) => params.dramBankOffset
+      case None => cache.dramBankOffset
+    }
 
     // Create the L2 Banks
     val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
