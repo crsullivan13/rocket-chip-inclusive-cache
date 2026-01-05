@@ -42,8 +42,8 @@ class PerfEvents() extends Bundle {
   val sinkCStall = new PerfEventInfo()
 }
 
-class ThrottleBundle() extends Bundle {
-  val dramBank = Vec(8, Bool())
+class ThrottleBundle(nDramBanks: Int) extends Bundle {
+  val dramBank = Vec(nDramBanks, Bool())
 }
 
 // class OuterReleaseInfo() extends Bundle {
@@ -73,7 +73,7 @@ class InclusiveCache(
     device = regulationDevice,
     beatBytes = 8)
 
-  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 8)) // TODO make number of domains one parameter everywhere
+  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 16)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -185,7 +185,7 @@ class InclusiveCache(
       }
 
       val params = InclusiveCacheParameters(cache, micro, !ctrls.isEmpty, edgeIn, edgeOut)
-      val scheduler = Module(new InclusiveCacheBankScheduler(params)).suggestName("inclusive_cache_bank_sched")
+      val scheduler = Module(new InclusiveCacheBankScheduler(params, nDomains, nDramBanks, dramBankOffset)).suggestName("inclusive_cache_bank_sched")
 
       scheduler.io.in <> in
       out <> scheduler.io.out

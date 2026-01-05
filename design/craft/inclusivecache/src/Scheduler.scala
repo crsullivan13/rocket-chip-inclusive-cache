@@ -26,7 +26,7 @@ import chisel3.experimental.dataview._
 
 import midas.targetutils.SynthesizePrintf
 
-class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Module
+class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
 {
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(params.inner.bundle))
@@ -38,10 +38,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     val req = Flipped(Decoupled(new SinkXRequest(params)))
     val resp = Decoupled(new SourceXRequest(params))
 
-    val throttle = Input(Vec(4, new ThrottleBundle()))
+    val throttle = Input(Vec(nDomains, new ThrottleBundle(nDramBanks)))
   })
 
-  val sourceA = Module(new SourceA(params))
+  val sourceA = Module(new SourceA(params, nDomains, nDramBanks, dramBankOffset))
   val sourceB = Module(new SourceB(params))
   val sourceC = Module(new SourceC(params))
   val sourceD = Module(new SourceD(params))
@@ -117,9 +117,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     params.ccover(stall_abc.reduce(_||_), "SCHEDULER_ABC_INTERLOCK", "ABC MSHR interlocked due to pre-emption")
   if (!params.lastLevel)
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
-
-  val nDramBanks = 8
-  val dramBankOffset = 16
 
   // Consider scheduling an MSHR only if all the resources it requires are available
   val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) => {
