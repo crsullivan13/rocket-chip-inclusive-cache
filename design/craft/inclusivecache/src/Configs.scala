@@ -59,7 +59,7 @@ class WithInclusiveCache(
   ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress),
   nDomains: Int = 4,
   nDramBanks: Int = 8,
-  dramBankOffset: Int = 16 // assume we have shifted it for set partitioning and only one rank
+  dramBankOffset: Int = 16 // assume we have shifted it for set partitioning
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
