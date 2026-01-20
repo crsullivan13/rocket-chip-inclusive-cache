@@ -28,7 +28,8 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val param  = UInt(3.W)
   val source = UInt(params.outer.bundle.sourceBits.W)
   val block  = Bool()
-  val domainId = UInt(2.W)
+  val rcid = UInt(6.W)
+  val mcid = UInt(6.W)
 }
 
 class SourceA(params: InclusiveCacheParameters) extends Module
@@ -56,5 +57,6 @@ class SourceA(params: InclusiveCacheParameters) extends Module
   a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
   a.bits.data    := 0.U
   a.bits.corrupt := false.B
-  a.bits.domainId := io.req.bits.domainId
+  a.bits.rcid := io.req.bits.rcid
+  a.bits.mcid := io.req.bits.mcid
 }

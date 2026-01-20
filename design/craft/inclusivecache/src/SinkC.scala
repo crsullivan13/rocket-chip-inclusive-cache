@@ -30,7 +30,9 @@ class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val source = UInt(params.inner.bundle.sourceBits.W)
   val param  = UInt(3.W)
   val data   = Bool()
-  val domainId = UInt(2.W)
+  //val domainId = UInt(2.W)
+  // val rcid = UInt(6.W)
+  // val mcid = UInt(6.W)
 }
 
 class PutBufferCEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -112,7 +114,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.resp.bits.source := c.bits.source
     io.resp.bits.param  := c.bits.param
     io.resp.bits.data   := hasData
-    io.resp.bits.domainId := c.bits.domainId
+    //io.resp.bits.domainId := c.bits.domainId
+    // io.resp.bits.rcid := c.bits.rcid
+    // io.resp.bits.mcid := c.bits.mcid
 
     val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferCEntry(params), params.relLists, params.relBeats, false)))
     val lists = RegInit(0.U(params.relLists.W))
@@ -151,7 +155,9 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.req.bits.set    := set
     io.req.bits.tag    := tag
     io.req.bits.put    := put
-    io.req.bits.domainId := c.bits.domainId
+    //io.req.bits.domainId := c.bits.domainId
+    io.req.bits.rcid := 0.U
+    io.req.bits.mcid := 0.U
 
     putbuffer.io.push.bits.index := put
     putbuffer.io.push.bits.data.data    := c.bits.data

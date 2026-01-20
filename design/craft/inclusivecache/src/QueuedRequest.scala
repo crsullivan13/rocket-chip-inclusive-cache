@@ -30,7 +30,8 @@ class QueuedRequest(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val tag    = UInt(params.tagBits.W)
   val offset = UInt(params.offsetBits.W)
   val put    = UInt(params.putBits.W)
-  val domainId = UInt(2.W)
+  val rcid = UInt(6.W)
+  val mcid = UInt(6.W)
 }
 
 class FullRequest(params: InclusiveCacheParameters) extends QueuedRequest(params)
