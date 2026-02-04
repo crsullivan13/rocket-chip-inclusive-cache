@@ -23,7 +23,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 
-import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey, BRUKey, CBQRIBwController, BcAllocCtlStatus, BcMonCtlStatus, BcMonCtlEvent, BcCtlOp}
+import freechips.rocketchip.subsystem._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
@@ -48,10 +48,8 @@ class InclusiveCache(
   // maybe move this later to reduce number of additions to code
   val regulationDevice = new SimpleDevice("llc-mshr-reg",Seq("llc-mshr-reg"))
 
-  val regnode = new TLRegisterNode(
-    address = Seq(AddressSet(0x21000000, 0x7ff)),
-    device = regulationDevice,
-    beatBytes = 8)
+  val cbqriParams = BwControllerParams(0x21000000, cache.nRCID, cache.nMCID, cache.cbqriVer, cache.nbwblks, cache.rpfx, cache.p, cache.mrbwb)
+  val mmio = LazyModule(new CBQRIBwController(regulationDevice, cbqriParams))
 
   // val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 16)) // TODO make number of domains one parameter everywhere
 
@@ -138,20 +136,9 @@ class InclusiveCache(
       println("")
     }
 
-    val nRCID = p(BRUKey) match {
-      case Some(params) => params.nRCID
-      case None => cache.nRCID
-    }
-
-    val nDramBanks = p(BRUKey) match {
-      case Some(params) => params.nDramBanks
-      case None => cache.nDramBanks
-    }
-
-    val dramBankOffset = p(BRUKey) match {
-      case Some(params) => params.dramBankOffset
-      case None => cache.dramBankOffset
-    }
+    val nRCID = cache.nRCID
+    val nDramBanks = cache.nDramBanks
+    val dramBankOffset = cache.dramBankOffset
 
     // Create the L2 Banks
     val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
@@ -227,19 +214,6 @@ class InclusiveCache(
         dramRegNode.bundle.nThrottle(i)(j) := throttleBit
       }
     }
-
-    val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
-
-    val periodLenRegField = RegField(periodLength.getWidth, periodLength, RegFieldDesc("periodLength", "Period length"))
-
-    val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(64, reg,
-        RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
-
-    regnode.regmap(
-      0x000 -> Seq(enGlobalField),
-      0x008 -> Seq(periodLenRegField),
-      0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
-    )
 
     ctrls.foreach { ctrl =>
       ctrl.module.io.flush_req.ready := false.B

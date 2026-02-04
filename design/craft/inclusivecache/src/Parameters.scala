@@ -36,6 +36,11 @@ case class CacheParameters(
   hintsSkipProbe: Boolean,
   nRCID: Int,
   nMCID: Int,
+  cbqriVer: Int,
+  nbwblks: Int,
+  rpfx: Boolean,
+  p: Int,
+  mrbwb: Int,
   nDramBanks: Int,
   dramBankOffset: Int)
 {
