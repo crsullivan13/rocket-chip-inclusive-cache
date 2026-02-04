@@ -26,7 +26,7 @@ import chisel3.experimental.dataview._
 
 import midas.targetutils.SynthesizePrintf
 
-class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
+class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
 {
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(params.inner.bundle))
@@ -38,10 +38,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: In
     val req = Flipped(Decoupled(new SinkXRequest(params)))
     val resp = Decoupled(new SourceXRequest(params))
 
-    val throttle = Input(Vec(nDomains, new ThrottleBundle(nDramBanks)))
+    val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
   })
 
-  val sourceA = Module(new SourceA(params, nDomains, nDramBanks, dramBankOffset))
+  val sourceA = Module(new SourceA(params, nRCID, nDramBanks, dramBankOffset))
   val sourceB = Module(new SourceB(params))
   val sourceC = Module(new SourceC(params))
   val sourceD = Module(new SourceD(params))
@@ -108,9 +108,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: In
   val stall_abc = (mshr_stall_abc zip abc_mshrs) map { case (s, m) => s && m.io.status.valid }
   (stall_abc zip abc_mshrs).foreach { case (stall, abc_mshr) =>
     when ( stall ) {
-      SynthesizePrintf(printf("ABC MSHR pre-empted, req from domain %d\n", abc_mshr.io.status.bits.domainId))
-      SynthesizePrintf(printf("BC MSHR req from domain %d, valid %d\n", bc_mshr.io.status.bits.domainId, bc_mshr.io.status.valid))
-      SynthesizePrintf(printf("C MSHR req from domain %d, valid %d\n", c_mshr.io.status.bits.domainId, c_mshr.io.status.valid))
+      SynthesizePrintf(printf("ABC MSHR pre-empted, req from domain %d\n", abc_mshr.io.status.bits.rcid))
+      SynthesizePrintf(printf("BC MSHR req from domain %d, valid %d\n", bc_mshr.io.status.bits.rcid, bc_mshr.io.status.valid))
+      SynthesizePrintf(printf("C MSHR req from domain %d, valid %d\n", c_mshr.io.status.bits.rcid, c_mshr.io.status.valid))
     }
   }
   if (!params.lastLevel || !params.firstLevel)
@@ -121,7 +121,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: In
   // Consider scheduling an MSHR only if all the resources it requires are available
   val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) => {
       val base = m.io.schedule.valid && !s &&
-        (sourceA.io.domainReadys(m.io.schedule.bits.a.bits.domainId) || !m.io.schedule.bits.a.valid) &&
+        (sourceA.io.domainReadys(m.io.schedule.bits.a.bits.rcid) || !m.io.schedule.bits.a.valid) &&
         (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
         (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
         (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
@@ -130,13 +130,13 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: In
         (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
         
       // val noThrottle = if ( m != bc_mshr && m != c_mshr ) { 
-      //     !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId)) && 
-      //     !(m.io.schedule.bits.c.valid && io.throttle(m.io.schedule.bits.c.bits.domainId) && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)
+      //     !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.rcid)) && 
+      //     !(m.io.schedule.bits.c.valid && io.throttle(m.io.schedule.bits.c.bits.rcid) && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)
       //   } else { 
       //     true.B 
       //   } params.expandAddress(m.io.schedule.bits.a.tag, m.io.schedule.bits.a.set, 0.U)
       val mshrDramBankTarget = ( params.expandAddress(m.io.schedule.bits.a.bits.tag, m.io.schedule.bits.a.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-      val shouldThrottle = io.throttle(m.io.schedule.bits.a.bits.domainId).dramBank(mshrDramBankTarget)
+      val shouldThrottle = io.throttle(m.io.schedule.bits.a.bits.rcid).dramBank(mshrDramBankTarget)
       val noThrottle = !(m.io.schedule.bits.a.valid && shouldThrottle)
 
       base && noThrottle
@@ -222,11 +222,11 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: In
     params.ccover(request.valid && nestC,  "SCHEDULER_NESTC", "Priority escalation from channel C")
 
     when ( request.valid && blockC ) {
-      SynthesizePrintf(printf("Block C while resolving set conflict, domain %d, blocker %d\n",request.bits.domainId, Mux1H(setMatches, mshrs.map(_.io.status.bits.domainId))))
+      SynthesizePrintf(printf("Block C while resolving set conflict, domain %d, blocker %d\n",request.bits.rcid, Mux1H(setMatches, mshrs.map(_.io.status.bits.rcid))))
     }
 
     when ( request.valid && nestC ) {
-      SynthesizePrintf(printf("Priority escalation from channel C, domain %d, nester %d\n",request.bits.domainId, Mux1H(setMatches, mshrs.map(_.io.status.bits.domainId))))
+      SynthesizePrintf(printf("Priority escalation from channel C, domain %d, nester %d\n",request.bits.rcid, Mux1H(setMatches, mshrs.map(_.io.status.bits.rcid))))
     }
   }
   params.ccover(request.valid && queue, "SCHEDULER_SECONDARY", "Enqueue secondary miss")
@@ -300,7 +300,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: In
 
   when ( request.valid && !request.ready ) {
     SynthesizePrintf(printf("Request not ready, alloc_cases %d, queue %d, bypassQueue %d, reqeusts push ready %d, domain %d\n",
-                              request_alloc_cases, queue, bypassQueue, requests.io.push.ready, request.bits.domainId))
+                              request_alloc_cases, queue, bypassQueue, requests.io.push.ready, request.bits.rcid))
   }
 
   // When a request goes through, it will need to hit the Directory

@@ -73,7 +73,7 @@ class InclusiveCache(
     device = regulationDevice,
     beatBytes = 8)
 
-  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 16)) // TODO make number of domains one parameter everywhere
+  // val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 16)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -158,9 +158,9 @@ class InclusiveCache(
       println("")
     }
 
-    val nDomains = p(BRUKey) match {
-      case Some(params) => params.nDomains
-      case None => cache.nDomains
+    val nRCID = p(BRUKey) match {
+      case Some(params) => params.nRCID
+      case None => cache.nRCID
     }
 
     val nDramBanks = p(BRUKey) match {
@@ -185,7 +185,7 @@ class InclusiveCache(
       }
 
       val params = InclusiveCacheParameters(cache, micro, !ctrls.isEmpty, edgeIn, edgeOut)
-      val scheduler = Module(new InclusiveCacheBankScheduler(params, nDomains, nDramBanks, dramBankOffset)).suggestName("inclusive_cache_bank_sched")
+      val scheduler = Module(new InclusiveCacheBankScheduler(params, nRCID, nDramBanks, dramBankOffset)).suggestName("inclusive_cache_bank_sched")
 
       scheduler.io.in <> in
       out <> scheduler.io.out
@@ -208,8 +208,8 @@ class InclusiveCache(
 
     val enGlobal = RegInit(0.B)
 
-    val outerAcquireCount = Seq.fill(nDomains)(Reg(Vec(nDramBanks, UInt(64.W))))
-    val acquireBudget = Reg(Vec(nDomains,UInt(64.W)))
+    val outerAcquireCount = Seq.fill(nRCID)(Reg(Vec(nDramBanks, UInt(64.W))))
+    val acquireBudget = Reg(Vec(nRCID,UInt(64.W)))
 
     val periodCount = RegInit(0.U(64.W))
     val periodLength = Reg(UInt(64.W))
@@ -220,7 +220,7 @@ class InclusiveCache(
 
     val activeAcquireDomains = mods.map( sched => {
       val didBankFireAcquire = sched.io.out.a.fire
-      val firedDomainId = WireDefault(nDomains.U)
+      val firedDomainId = WireDefault(nRCID.U)
       val dramBankTarget = WireDefault(nDramBanks.U)
 
       when ( didBankFireAcquire ) {
@@ -232,9 +232,9 @@ class InclusiveCache(
       (firedDomainId: UInt, dramBankTarget: UInt)
     })
 
-    val throttleRegs = Reg(Vec(nDomains, Vec(nDramBanks, Bool())))
+    val throttleRegs = Reg(Vec(nRCID, Vec(nDramBanks, Bool())))
 
-    for ( i <- 0 until nDomains ) {
+    for ( i <- 0 until nRCID ) {
       val didDomainFireAcquire = activeAcquireDomains.map{ case (id, _) => id === i.U }.reduce(_||_)
 
       for ( j <- 0 until nDramBanks ) {

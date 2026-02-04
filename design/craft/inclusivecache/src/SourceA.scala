@@ -34,13 +34,13 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val mcid = UInt(6.W)
 }
 
-class SourceA(params: InclusiveCacheParameters, nDomains: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
+class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
 {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
-    val domainReadys = Output(Vec(nDomains, Bool()))
+    val rcidReadys = Output(Vec(nRCID, Bool()))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
-    val throttle = Input(Vec(nDomains, new ThrottleBundle(nDramBanks)))
+    val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
     //val outerAcquireInfo = Output(new OuterAcquireInfo())
   })
 
@@ -50,34 +50,34 @@ class SourceA(params: InclusiveCacheParameters, nDomains: Int, nDramBanks: Int, 
   // io.outerAcquireInfo.didFireAcquire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
   // io.outerAcquireInfo.dramBank := (a.bits.address >> 13.U) & 7.U // magic numbers are 8KB rows and 8 banks
   // io.outerAcquireInfo.regulationDomain := a.bits.domainId
-  val domainAs = Seq.fill(nDomains)(Wire(chiselTypeOf(io.a)))
-  val domainBuffs = domainAs.map( a => { params.micro.outerBuf.a(a) } )
+  val rcidAs = Seq.fill(nRCID)(Wire(chiselTypeOf(io.a)))
+  val rcidBuffs = rcidAs.map( a => { params.micro.outerBuf.a(a) } )
 
-  val domainReadys = Wire(Vec(nDomains, Bool()))
+  val rcidReadys = Wire(Vec(nRCID, Bool()))
 
-  val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle), nDomains))
+  val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle), nRCID))
 
   // io.outerAcquireInfo.didFireAcquire := io.a.fire
   // io.outerAcquireInfo.regulationDomain := io.a.bits.domainId // when setup
 
-  for ( i <- 0 until nDomains ) {
-    val a = domainAs(i)
-    val buffer = domainBuffs(i)
+  for ( i <- 0 until nRCID ) {
+    val a = rcidAs(i)
+    val buffer = rcidBuffs(i)
 
     val buffHeadDramBankTarget = ( buffer.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
     val shouldThrottle = io.throttle(i).dramBank(buffHeadDramBankTarget)
 
-    io.domainReadys(i) := a.ready
-    domainReadys(i) := a.ready
+    io.rcidReadys(i) := a.ready
+    rcidReadys(i) := a.ready
 
     arb.io.in(i) <> buffer
     buffer.ready := arb.io.in(i).ready && !(shouldThrottle)
     arb.io.in(i).valid := buffer.valid && !(shouldThrottle)
 
-    a.valid := io.req.valid && io.req.bits.domainId === i.U
+    a.valid := io.req.valid && io.req.bits.rcid === i.U
     params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
     when ( a.valid && !a.ready ) {
-      SynthesizePrintf(printf("SourceA: Valid req, a not ready, domain %d\n", a.bits.domainId))
+      SynthesizePrintf(printf("SourceA: Valid req, a not ready, domain %d\n", a.bits.rcid))
     }
 
     a.bits.rcid := io.req.bits.rcid
@@ -96,6 +96,6 @@ class SourceA(params: InclusiveCacheParameters, nDomains: Int, nDramBanks: Int, 
 
   // this should really be the ready of the buffer that corresponds to incomming request's domain
   // doing that creates a combinational loop i haven't solved, andR of all for now
-  //io.req.ready := domainAs.map( a => a.ready).reduce(_&&_)
-  io.req.ready := MuxLookup(io.req.bits.domainId, domainReadys(0), (0 until nDomains).map( i => i.U -> domainReadys(i) ) )
+  //io.req.ready := rcidAs.map( a => a.ready).reduce(_&&_)
+  io.req.ready := MuxLookup(io.req.bits.rcid, rcidReadys(0), (0 until nDomains).map( i => i.U -> rcidReadys(i) ) )
 }
