@@ -34,7 +34,8 @@ case class CacheParameters(
   blockBytes:  Int,
   beatBytes:   Int, // inner
   hintsSkipProbe: Boolean,
-  nDomains: Int,
+  nRCID: Int,
+  nMCID: Int,
   nDramBanks: Int,
   dramBankOffset: Int)
 {

@@ -30,7 +30,8 @@ import sifive.blocks.inclusivecache.InclusiveCacheParameters
 case class InclusiveCacheParams(
   ways: Int,
   sets: Int,
-  nDomains: Int,
+  nRCID: Int,
+  nMCID: Int,
   nDramBanks: Int,
   dramBankOffset: Int,
   writeBytes: Int, // backing store update granularity
@@ -57,14 +58,16 @@ class WithInclusiveCache(
   hintsSkipProbe: Boolean = false,
   bankedControl: Boolean = false,
   ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress),
-  nDomains: Int = 4,
+  nRCID: Int = 64,
+  nMCID: Int = 64,
   nDramBanks: Int = 8,
   dramBankOffset: Int = 16 // assume we have shifted it for set partitioning
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
       ways = nWays,
-      nDomains = nDomains,
+      nRCID = nRCID,
+      nMCID = nMCID,
       nDramBanks = nDramBanks,
       dramBankOffset = dramBankOffset,
       memCycles = outerLatencyCycles,
@@ -81,7 +84,8 @@ class WithInclusiveCache(
     val ibus = context.ibus
     val InclusiveCacheParams(
       ways,
-      nDomains,
+      nRCID,
+      nMCID,
       nDramBanks,
       dramBankOffset,
       sets,
@@ -107,7 +111,8 @@ class WithInclusiveCache(
       CacheParameters(
         level = 2,
         ways = ways,
-        nDomains = nDomains,
+        nRCID = nRCID,
+        nMCID = nMCID,
         nDramBanks = nDramBanks,
         dramBankOffset = dramBankOffset,
         sets = sets,

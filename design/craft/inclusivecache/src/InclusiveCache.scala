@@ -23,33 +23,13 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 
-import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey, BRUKey}
+import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey, BRUKey, CBQRIBwController, BcAllocCtlStatus, BcMonCtlStatus, BcMonCtlEvent, BcCtlOp}
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
 import freechips.rocketchip.tile._
 
 import midas.targetutils.SynthesizePrintf
-
-// TODO: Unify/remove these info bundles, i.e. make the code not bad
-class PerfEventInfo() extends Bundle {
-  val domainId = UInt(2.W)
-  val didEventOccur = Bool()
-}
-
-class PerfEvents() extends Bundle {
-  val sinkAStall = new PerfEventInfo()
-  val sinkCStall = new PerfEventInfo()
-}
-
-class ThrottleBundle(nDramBanks: Int) extends Bundle {
-  val dramBank = Vec(nDramBanks, Bool())
-}
-
-// class OuterReleaseInfo() extends Bundle {
-//   val regulationDomain = UInt(2.W)
-//   val didFireRelease = Bool()
-// }
 
 class InclusiveCache(
   val cache: CacheParameters,
