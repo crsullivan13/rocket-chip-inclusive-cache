@@ -30,6 +30,7 @@ class SourceCRequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val set    = UInt(params.setBits.W)
   val way    = UInt(params.wayBits.W)
   val dirty  = Bool()
+  val domainId = UInt(2.W)
 }
 
 class SourceC(params: InclusiveCacheParameters) extends Module
@@ -114,10 +115,18 @@ class SourceC(params: InclusiveCacheParameters) extends Module
   c.bits.address := params.expandAddress(s3_req.tag, s3_req.set, 0.U)
   c.bits.data    := io.bs_dat.data
   c.bits.corrupt := false.B
+  c.bits.domainId := s3_req.domainId
 
   // We never accept at the front-end unless we're sure things will fit
   assert(!c.valid || c.ready)
   params.ccover(!c.ready, "SOURCEC_QUEUE_FULL", "Eviction queue fully utilized")
+  when ( !c.ready ) {
+    printf("LLC: SourceC queue is full\n")
+  }
+
+  when ( !io.c.ready ) {
+    printf("LLC: SourceC outedge is not ready\n")
+  }
 
   queue.io.enq <> c
   io.c <> queue.io.deq

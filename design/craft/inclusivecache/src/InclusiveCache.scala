@@ -23,9 +23,33 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 
-import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey}
+import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey, BRUKey}
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
+
+import freechips.rocketchip.tile._
+
+import midas.targetutils.SynthesizePrintf
+
+// TODO: Unify/remove these info bundles, i.e. make the code not bad
+class PerfEventInfo() extends Bundle {
+  val domainId = UInt(2.W)
+  val didEventOccur = Bool()
+}
+
+class PerfEvents() extends Bundle {
+  val sinkAStall = new PerfEventInfo()
+  val sinkCStall = new PerfEventInfo()
+}
+
+class ThrottleBundle(nDramBanks: Int) extends Bundle {
+  val dramBank = Vec(nDramBanks, Bool())
+}
+
+// class OuterReleaseInfo() extends Bundle {
+//   val regulationDomain = UInt(2.W)
+//   val didFireRelease = Bool()
+// }
 
 class InclusiveCache(
   val cache: CacheParameters,
@@ -39,6 +63,17 @@ class InclusiveCache(
   val atom = TransferSizes(1, cache.beatBytes)
 
   var resourcesOpt: Option[ResourceBindings] = None
+
+  // create our own register node for regulation, easier than using the control node since it could be per-bank
+  // maybe move this later to reduce number of additions to code
+  val regulationDevice = new SimpleDevice("llc-mshr-reg",Seq("llc-mshr-reg"))
+
+  val regnode = new TLRegisterNode(
+    address = Seq(AddressSet(0x21000000, 0x7ff)),
+    device = regulationDevice,
+    beatBytes = 8)
+
+  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 16)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -106,6 +141,7 @@ class InclusiveCache(
 
   lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
+
     // If you have a control port, you must have at least one cache port
     require (ctrls.isEmpty || !node.edges.in.isEmpty)
 
@@ -122,8 +158,23 @@ class InclusiveCache(
       println("")
     }
 
+    val nDomains = p(BRUKey) match {
+      case Some(params) => params.nDomains
+      case None => cache.nDomains
+    }
+
+    val nDramBanks = p(BRUKey) match {
+      case Some(params) => params.nDramBanks
+      case None => cache.nDramBanks
+    }
+
+    val dramBankOffset = p(BRUKey) match {
+      case Some(params) => params.dramBankOffset
+      case None => cache.dramBankOffset
+    }
+
     // Create the L2 Banks
-    val mods = (node.in zip node.out) map { case ((in, edgeIn), (out, edgeOut)) =>
+    val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
       edgeOut.manager.managers.foreach { m =>
         require (m.supportsAcquireB.contains(xfer),
           s"All managers behind the L2 must support acquireB($xfer) " +
@@ -134,7 +185,7 @@ class InclusiveCache(
       }
 
       val params = InclusiveCacheParameters(cache, micro, !ctrls.isEmpty, edgeIn, edgeOut)
-      val scheduler = Module(new InclusiveCacheBankScheduler(params)).suggestName("inclusive_cache_bank_sched")
+      val scheduler = Module(new InclusiveCacheBankScheduler(params, nDomains, nDramBanks, dramBankOffset)).suggestName("inclusive_cache_bank_sched")
 
       scheduler.io.in <> in
       out <> scheduler.io.out
@@ -146,7 +197,6 @@ class InclusiveCache(
       scheduler.io.req.bits.address := 0.U
       scheduler.io.resp.ready := true.B
 
-
       // Fix-up the missing addresses. We do this here so that the Scheduler can be
       // deduplicated by Firrtl to make hierarchical place-and-route easier.
       out.a.bits.address := params.restoreAddress(scheduler.io.out.a.bits.address)
@@ -155,6 +205,61 @@ class InclusiveCache(
 
       scheduler
     }
+
+    val enGlobal = RegInit(0.B)
+
+    val outerAcquireCount = Seq.fill(nDomains)(Reg(Vec(nDramBanks, UInt(64.W))))
+    val acquireBudget = Reg(Vec(nDomains,UInt(64.W)))
+
+    val periodCount = RegInit(0.U(64.W))
+    val periodLength = Reg(UInt(64.W))
+    val periodReset = Wire(Bool())
+
+    periodReset := periodCount >= periodLength
+    periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
+
+    val activeAcquireDomains = mods.map( sched => {
+      val didBankFireAcquire = sched.io.out.a.fire
+      val firedDomainId = WireDefault(nDomains.U)
+      val dramBankTarget = WireDefault(nDramBanks.U)
+
+      when ( didBankFireAcquire ) {
+        firedDomainId := sched.io.out.a.bits.domainId
+        dramBankTarget := ( sched.io.out.a.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
+        printf("LLC: read out fired domain %d\n", firedDomainId)
+      }
+
+      (firedDomainId: UInt, dramBankTarget: UInt)
+    })
+
+    val throttleRegs = Reg(Vec(nDomains, Vec(nDramBanks, Bool())))
+
+    for ( i <- 0 until nDomains ) {
+      val didDomainFireAcquire = activeAcquireDomains.map{ case (id, _) => id === i.U }.reduce(_||_)
+
+      for ( j <- 0 until nDramBanks ) {
+        val didTargetBank = activeAcquireDomains.map{ case (_, bank) => bank === j.U }.reduce(_||_) && didDomainFireAcquire
+        outerAcquireCount(i)(j) := Mux(periodReset || !enGlobal, 0.U + didTargetBank, didTargetBank + outerAcquireCount(i)(j))
+
+        val throttleBit = (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal
+        throttleRegs(i)(j) := throttleBit
+        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := throttleRegs(i)(j) )
+        dramRegNode.bundle.nThrottle(i)(j) := throttleBit
+      }
+    }
+
+    val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
+
+    val periodLenRegField = RegField(periodLength.getWidth, periodLength, RegFieldDesc("periodLength", "Period length"))
+
+    val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(64, reg,
+        RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
+
+    regnode.regmap(
+      0x000 -> Seq(enGlobalField),
+      0x008 -> Seq(periodLenRegField),
+      0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
+    )
 
     ctrls.foreach { ctrl =>
       ctrl.module.io.flush_req.ready := false.B

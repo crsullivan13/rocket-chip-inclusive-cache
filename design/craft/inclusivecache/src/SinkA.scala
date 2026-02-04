@@ -22,6 +22,8 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 
+import midas.targetutils.SynthesizePrintf
+
 class PutBufferAEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
   val data = UInt(params.inner.bundle.dataBits.W)
@@ -71,7 +73,6 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   val buf_block = hasData && !putbuffer.io.push.ready
   val set_block = hasData && first && !free
 
-  params.ccover(a.valid && req_block, "SINKA_REQ_STALL", "No MSHR available to sink request")
   params.ccover(a.valid && buf_block, "SINKA_BUF_STALL", "No space in putbuffer for beat")
   params.ccover(a.valid && set_block, "SINKA_SET_STALL", "No space in putbuffer for request")
 

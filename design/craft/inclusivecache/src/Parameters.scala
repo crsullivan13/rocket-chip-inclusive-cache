@@ -33,7 +33,10 @@ case class CacheParameters(
   sets:        Int,
   blockBytes:  Int,
   beatBytes:   Int, // inner
-  hintsSkipProbe: Boolean)
+  hintsSkipProbe: Boolean,
+  nDomains: Int,
+  nDramBanks: Int,
+  dramBankOffset: Int)
 {
   require (ways > 0)
   require (sets > 0)
@@ -66,7 +69,7 @@ object InclusiveCachePortParameters
     e = BufferParams.none)
 
   val full = InclusiveCachePortParameters(
-    a = BufferParams.default,
+    a = BufferParams(2, false, false),
     b = BufferParams.default,
     c = BufferParams.default,
     d = BufferParams.default,
@@ -164,6 +167,7 @@ case class InclusiveCacheParameters(
   val putBeats = max(2*cache.blockBeats, micro.memCycles)
   val relLists = 2
   val relBeats = relLists*cache.blockBeats
+  println(s"CACHE: realBeats is ${relBeats}")
 
   val flatAddresses = AddressSet.unify(outer.manager.managers.flatMap(_.address))
   val pickMask = AddressDecoder(flatAddresses.map(Seq(_)), flatAddresses.map(_.mask).reduce(_|_))
@@ -298,7 +302,7 @@ object InclusiveCacheParameters
   }
   def all_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int =
     // We need a dedicated MSHR for B+C each
-    2 + out_mshrs(cache, micro)
+    2 + out_mshrs(cache, micro) //+ 4
 }
 
 class InclusiveCacheBundle(params: InclusiveCacheParameters) extends Bundle
