@@ -173,45 +173,137 @@ class InclusiveCache(
       scheduler
     }
 
-    val enGlobal = RegInit(0.B)
-
-    val outerAcquireCount = Seq.fill(nRCID)(Reg(Vec(nDramBanks, UInt(64.W))))
-    val acquireBudget = Reg(Vec(nRCID,UInt(64.W)))
+    val bankReadCntrs = Seq.fill(nRCID)(Reg(Vec(nDramBanks, UInt(64.W))))
+    val maxReads = Reg(Vec(nRCID,UInt(64.W)))
+    val throttleRegs = Reg(Vec(nRCID, Vec(nDramBanks, Bool())))
 
     val periodCount = RegInit(0.U(64.W))
-    val periodLength = Reg(UInt(64.W))
     val periodReset = Wire(Bool())
 
-    periodReset := periodCount >= periodLength
-    periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
+    val mcidCounters = RegInit(VecInit(Seq.fill(nMCID)(0.U(62.W))))
+    val mcidEvts = RegInit(VecInit(Seq.fill(nMCID)(BcMonCtlEvent.NONE)))
+    val s_mcid_hold :: s_mcid_count :: s_mcid_reset :: Nil = Enum(3)
+    val mcidStates = RegInit(VecInit(Seq.fill(nMCID)(s_mcid_hold)))
 
-    val activeAcquireDomains = mods.map( sched => {
+    mmio.module.io.bc_mon_resp.valid := false.B
+    mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.OK
+    mmio.module.io.bc_mon_resp.bits.hasData := false.B
+    mmio.module.io.bc_mon_resp.bits.data := 0.U
+    when ( mmio.module.io.bc_mon_command.valid ) {
+      val opEnum = mmio.module.io.bc_mon_command.bits.op
+      val opValid = ( opEnum === BcCtlOp.CONFIG ) || ( opEnum === BcCtlOp.READ )
+      val evtEnum = mmio.module.io.bc_mon_command.bits.event
+      val evtValid = ( evtEnum === BcMonCtlEvent.NONE ) || ( evtEnum === BcMonCtlEvent.READ_WRITE ) ||
+                  ( evtEnum === BcMonCtlEvent.READ_ONLY ) || ( evtEnum === BcMonCtlEvent.WRITE_ONLY )
+      val mcid = mmio.module.io.bc_mon_command.bits.mcid
+      val mcidValid = mcid < nMCID.U
+
+      mmio.module.io.bc_mon_resp.valid := true.B
+      when ( opValid && mcidValid && evtValid ) {
+        switch ( opEnum ) {
+          is ( BcCtlOp.CONFIG ) {
+            when ( evtEnum =/= BcMonCtlEvent.NONE ) {
+              mcidStates(mcid) := s_mcid_reset
+            } .otherwise {
+              mcidStates(mcid) := s_mcid_hold
+            }
+            mcidEvts(mcid) := evtEnum
+            mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.OK
+          }
+          is ( BcCtlOp.READ ) {
+            mmio.module.io.bc_mon_resp.bits.hasData := true.B
+            mmio.module.io.bc_mon_resp.bits.data := mcidCounters(mcid)
+            mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.OK
+          }
+        }
+      } .elsewhen ( !mcidValid ) {
+        mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.INVALID_MCID
+      } .elsewhen ( !evtValid ) {
+        mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.INVALID_EVT_ID
+      }.otherwise {
+        mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.INVALID_OP
+      }
+    }
+
+    mmio.module.io.bc_alloc_ctl_resp.valid := false.B
+    mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.OK
+    mmio.module.io.bc_alloc_ctl_resp.bits.hasData := false.B
+    mmio.module.io.bc_alloc_ctl_resp.bits.data := 0.U
+    when ( mmio.module.io.bc_alloc_ctl_command.valid ) {
+      val opEnum = mmio.module.io.bc_alloc_ctl_command.bits.op
+      val opValid = ( opEnum === BcCtlOp.CONFIG ) || ( opEnum === BcCtlOp.READ )
+      val rcid = mmio.module.io.bc_alloc_ctl_command.bits.rcid
+      val rcidValid = rcid < nRCID.U
+      
+      val rbwb = mmio.module.io.bc_alloc_ctl_command.bits.rbwb
+
+      mmio.module.io.bc_alloc_ctl_resp.valid := true.B
+      when ( opValid && rcidValid ) {
+        switch ( opEnum ) {
+          is ( BcCtlOp.CONFIG ) {
+            val rbwbValid = rbwb > 0.U && rbwb <= mrbwb.U
+            when ( rbwbValid ) {
+              maxReads(rcid) := rbwb
+              mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.OK
+            } .otherwise {
+              mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.INVALID_BWB
+            }
+          }
+          is ( BcCtlOp.READ ) {
+            mmio.module.io.bc_alloc_ctl_resp.bits.hasData := true.B
+            mmio.module.io.bc_alloc_ctl_resp.bits.data := maxReads(rcid)
+            mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.OK
+          }
+        }
+      } .elsewhen ( !rcidValid ) {
+        mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.INVALID_RCID
+      }.otherwise {
+        mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.INVALID_OP
+      }
+    }
+
+    periodReset := periodCount >= mmio.module.io.periodLen
+    periodCount := Mux(periodReset || !mmio.module.io.enGlobal, 0.U, periodCount + 1.U)
+
+    val activeAcquires = mods.map( sched => {
       val didBankFireAcquire = sched.io.out.a.fire
-      val firedDomainId = WireDefault(nRCID.U)
+      val firedRCID = WireDefault(nRCID.U)
+      val firedMCID = WireDefault(nMCID.U)
       val dramBankTarget = WireDefault(nDramBanks.U)
 
       when ( didBankFireAcquire ) {
-        firedDomainId := sched.io.out.a.bits.domainId
+        firedRCID := sched.io.out.a.bits.rcid
+        firedMCID := sched.io.out.a.bits.mcid
         dramBankTarget := ( sched.io.out.a.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-        printf("LLC: read out fired domain %d\n", firedDomainId)
+        printf("LLC: read out fired domain %d\n", rcid)
       }
 
-      (firedDomainId: UInt, dramBankTarget: UInt)
+      (firedRCID: UInt, firedMCID: UInt, dramBankTarget: UInt)
     })
 
-    val throttleRegs = Reg(Vec(nRCID, Vec(nDramBanks, Bool())))
+    for ( i <- 0 until nMCID ) {
+      val didMCIDFireAcquire = activeAcquires.map{ case (_, mcid, _) => mcid === i.U }.reduce(_||_)
+      
+      when ( mcidStates(i) === s_mcid_count ) {
+        mcidCounters(i) := didMCIDFireAcquire + mcidCounters(i)
+      } .elsewhen ( mcidStates(i) === s_mcid_hold ) {
+        mcidCounters(i) := mcidCounters(i)
+      } .elsewhen ( mcidStates(i) === s_mcid_reset ) {
+        mcidCounters(i) := 0.U
+        mcidStates(i) := s_mcid_count
+      }
+    }
 
     for ( i <- 0 until nRCID ) {
-      val didDomainFireAcquire = activeAcquireDomains.map{ case (id, _) => id === i.U }.reduce(_||_)
+      val didRCIDFireAcquire = activeAcquires.map{ case (rcid, _, _) => rcid === i.U }.reduce(_||_)
 
       for ( j <- 0 until nDramBanks ) {
-        val didTargetBank = activeAcquireDomains.map{ case (_, bank) => bank === j.U }.reduce(_||_) && didDomainFireAcquire
-        outerAcquireCount(i)(j) := Mux(periodReset || !enGlobal, 0.U + didTargetBank, didTargetBank + outerAcquireCount(i)(j))
+        val didTargetBank = activeAcquires.map{ case (_, _, bank) => bank === j.U }.reduce(_||_) && didRCIDFireAcquire
+        bankReadCntrs(i)(j) := Mux(periodReset || !mmio.module.io.enGlobal, 0.U + didTargetBank, didTargetBank + bankReadCntrs(i)(j))
 
-        val throttleBit = (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal
+        val throttleBit = (bankReadCntrs(i)(j) >= maxReads(i)) && mmio.module.io.enGlobal
         throttleRegs(i)(j) := throttleBit
         mods.foreach( sched => sched.io.throttle(i).dramBank(j) := throttleRegs(i)(j) )
-        dramRegNode.bundle.nThrottle(i)(j) := throttleBit
       }
     }
 
