@@ -30,12 +30,13 @@ import sifive.blocks.inclusivecache.InclusiveCacheParameters
 case class InclusiveCacheParams(
   ways: Int,
   sets: Int,
+  hintsSkipProbe: Boolean = false, // do hints probe the same client
   nRCID: Int,
   nMCID: Int,
   cbqriVer: Int,
   nbwblks: Int,
   rpfx: Boolean,
-  p: Int,
+  pfx: Int,
   mrbwb: Int,
   nDramBanks: Int,
   dramBankOffset: Int,
@@ -43,7 +44,6 @@ case class InclusiveCacheParams(
   portFactor: Int, // numSubBanks = (widest TL port * portFactor) / writeBytes
   memCycles: Int,  // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
   physicalFilter: Option[PhysicalFilterParams] = None,
-  hintsSkipProbe: Boolean = false, // do hints probe the same client
   bankedControl: Boolean = false, // bank the cache ctrl with the cache banks
   ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress),
   // Interior/Exterior refer to placement either inside the Scheduler or outside it
@@ -68,7 +68,7 @@ class WithInclusiveCache(
   cbqriVer: Int = 1,
   nbwblks: Int = 65535,
   rpfx: Boolean = false,
-  p: Int = 0,
+  pfx: Int = 0,
   mrbwb: Int = 52428,
   nDramBanks: Int = 8,
   dramBankOffset: Int = 16 // assume we have shifted it for set partitioning
@@ -76,19 +76,19 @@ class WithInclusiveCache(
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
       ways = nWays,
+      hintsSkipProbe = hintsSkipProbe,
       nRCID = nRCID,
       nMCID = nMCID,
       cbqriVer = cbqriVer,
       nbwblks = nbwblks,
       rpfx = rpfx,
-      p = p,
+      pfx = pfx,
       mrbwb = mrbwb,
       nDramBanks = nDramBanks,
       dramBankOffset = dramBankOffset,
       memCycles = outerLatencyCycles,
       writeBytes = site(XLen)/8,
       portFactor = subBankingFactor,
-      hintsSkipProbe = hintsSkipProbe,
       bankedControl = bankedControl,
       ctrlAddr = ctrlAddr)
   case SubsystemBankedCoherenceKey => up(SubsystemBankedCoherenceKey, site).copy(coherenceManager = { context =>
@@ -99,21 +99,21 @@ class WithInclusiveCache(
     val ibus = context.ibus
     val InclusiveCacheParams(
       ways,
+      sets,
+      hintsSkipProbe,
       nRCID,
       nMCID,
       cbqriVer,
       nbwblks,
       rpfx,
-      p,
+      pfx,
       mrbwb,
       nDramBanks,
       dramBankOffset,
-      sets,
       writeBytes,
       portFactor,
       memCycles,
       physicalFilter,
-      hintsSkipProbe,
       bankedControl,
       ctrlAddr,
       bufInnerInterior,
@@ -131,16 +131,16 @@ class WithInclusiveCache(
       CacheParameters(
         level = 2,
         ways = ways,
+        sets = sets,
         nRCID = nRCID,
         nMCID = nMCID,
-        cbqriVer,
-        nbwblks,
-        rpfx,
-        p,
-        mrbwb,
+        cbqriVer = cbqriVer,
+        nbwblks = nbwblks,
+        rpfx = rpfx,
+        pfx = pfx,
+        mrbwb = mrbwb,
         nDramBanks = nDramBanks,
         dramBankOffset = dramBankOffset,
-        sets = sets,
         blockBytes = sbus.blockBytes,
         beatBytes = sbus.beatBytes,
         hintsSkipProbe = hintsSkipProbe),
@@ -190,7 +190,7 @@ class WithInclusiveCache(
     }
 
     pbus.coupleTo("mshr-regulation-regnode") {
-        l2.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
+        l2.mmio.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
     ElaborationArtefacts.add("l2.json", l2.module.json)

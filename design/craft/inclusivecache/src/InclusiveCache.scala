@@ -31,6 +31,10 @@ import freechips.rocketchip.tile._
 
 import midas.targetutils.SynthesizePrintf
 
+class ThrottleBundle(nDramBanks: Int) extends Bundle {
+  val dramBank = Vec(nDramBanks, Bool())
+}
+
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
@@ -48,7 +52,7 @@ class InclusiveCache(
   // maybe move this later to reduce number of additions to code
   val regulationDevice = new SimpleDevice("llc-mshr-reg",Seq("llc-mshr-reg"))
 
-  val cbqriParams = BwControllerParams(0x21000000, cache.nRCID, cache.nMCID, cache.cbqriVer, cache.nbwblks, cache.rpfx, cache.p, cache.mrbwb)
+  val cbqriParams = BwControllerParams(0x21000000, cache.nRCID, cache.nMCID, cache.cbqriVer, cache.nbwblks, cache.rpfx, cache.pfx, cache.mrbwb)
   val mmio = LazyModule(new CBQRIBwController(regulationDevice, cbqriParams))
 
   // val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 16)) // TODO make number of domains one parameter everywhere
@@ -137,6 +141,8 @@ class InclusiveCache(
     }
 
     val nRCID = cache.nRCID
+    val nMCID = cache.nMCID
+    val mrbwb = cache.mrbwb
     val nDramBanks = cache.nDramBanks
     val dramBankOffset = cache.dramBankOffset
 
@@ -275,7 +281,7 @@ class InclusiveCache(
         firedRCID := sched.io.out.a.bits.rcid
         firedMCID := sched.io.out.a.bits.mcid
         dramBankTarget := ( sched.io.out.a.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-        printf("LLC: read out fired domain %d\n", rcid)
+        printf("LLC: read out fired domain %d\n", firedRCID)
       }
 
       (firedRCID: UInt, firedMCID: UInt, dramBankTarget: UInt)

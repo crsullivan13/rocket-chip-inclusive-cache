@@ -97,5 +97,5 @@ class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dra
   // this should really be the ready of the buffer that corresponds to incomming request's domain
   // doing that creates a combinational loop i haven't solved, andR of all for now
   //io.req.ready := rcidAs.map( a => a.ready).reduce(_&&_)
-  io.req.ready := MuxLookup(io.req.bits.rcid, rcidReadys(0), (0 until nDomains).map( i => i.U -> rcidReadys(i) ) )
+  io.req.ready := MuxLookup(io.req.bits.rcid, rcidReadys(0), (0 until nRCID).map( i => i.U -> rcidReadys(i) ) )
 }

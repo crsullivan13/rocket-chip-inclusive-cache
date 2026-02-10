@@ -39,7 +39,7 @@ case class CacheParameters(
   cbqriVer: Int,
   nbwblks: Int,
   rpfx: Boolean,
-  p: Int,
+  pfx: Int,
   mrbwb: Int,
   nDramBanks: Int,
   dramBankOffset: Int)

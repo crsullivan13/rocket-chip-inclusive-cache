@@ -121,7 +121,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   // Consider scheduling an MSHR only if all the resources it requires are available
   val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) => {
       val base = m.io.schedule.valid && !s &&
-        (sourceA.io.domainReadys(m.io.schedule.bits.a.bits.rcid) || !m.io.schedule.bits.a.valid) &&
+        (sourceA.io.rcidReadys(m.io.schedule.bits.a.bits.rcid) || !m.io.schedule.bits.a.valid) &&
         (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
         (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
         (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&

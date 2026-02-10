@@ -30,7 +30,8 @@ class SourceCRequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val set    = UInt(params.setBits.W)
   val way    = UInt(params.wayBits.W)
   val dirty  = Bool()
-  val domainId = UInt(2.W)
+  // val rcid = UInt(6.W)
+  // val mcid = UInt(6.W)
 }
 
 class SourceC(params: InclusiveCacheParameters) extends Module
@@ -115,7 +116,9 @@ class SourceC(params: InclusiveCacheParameters) extends Module
   c.bits.address := params.expandAddress(s3_req.tag, s3_req.set, 0.U)
   c.bits.data    := io.bs_dat.data
   c.bits.corrupt := false.B
-  c.bits.domainId := s3_req.domainId
+  // c.bits.domainId := s3_req.domainId
+  // c.bits.rcid := s3_req.rcid
+  // c.bits.mcid := s3_req.mcid
 
   // We never accept at the front-end unless we're sure things will fit
   assert(!c.valid || c.ready)
