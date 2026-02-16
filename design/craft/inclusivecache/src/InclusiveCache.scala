@@ -50,7 +50,19 @@ class InclusiveCache(
 
   // create our own register node for regulation, easier than using the control node since it could be per-bank
   // maybe move this later to reduce number of additions to code
-  val regulationDevice = new SimpleDevice("llc-mshr-reg",Seq("llc-mshr-reg"))
+  val regulationDevice = new SimpleDevice("dram-memory-reg",Seq("rsicv,cbqri-bandwidth-memory", "rsicv,cbqri-bandwidth")) {
+    def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
+
+    override def describe(resources: ResourceBindings): Description = {
+      resourcesOpt = Some(resources)
+
+      val Description(name, mapping) = super.describe(resources)
+      val extra = Map(
+        "riscv,cbqri-rcid" -> ofInt(cache.nRCID),
+        "riscv,cbqri-mcid" -> ofInt(cache.nMCID))
+      Description(name, mapping ++ extra)
+    }
+  }
 
   val cbqriParams = BwControllerParams(0x21000000, cache.nRCID, cache.nMCID, cache.cbqriVer, cache.nbwblks, cache.rpfx, cache.pfx, cache.mrbwb)
   val mmio = LazyModule(new CBQRIBwController(regulationDevice, cbqriParams))
@@ -135,7 +147,7 @@ class InclusiveCache(
     node.edges.in.headOption.foreach { n =>
       println(s"L${cache.level} InclusiveCache Client Map:")
       n.client.clients.zipWithIndex.foreach { case (c,i) =>
-        println(s"\t${i} <= ${c.name}")
+        println(s"\t${i} <= ${c.name} sourceId=[${c.sourceId.start}, ${c.sourceId.end}]")
       }
       println("")
     }
@@ -159,6 +171,10 @@ class InclusiveCache(
 
       val params = InclusiveCacheParameters(cache, micro, !ctrls.isEmpty, edgeIn, edgeOut)
       val scheduler = Module(new InclusiveCacheBankScheduler(params, nRCID, nDramBanks, dramBankOffset)).suggestName("inclusive_cache_bank_sched")
+
+      when (in.a.fire && in.a.bits.mcid === 0.U) {
+        printf("LLC in: mcid %d | source %d | opcode %d | address %d\n", in.a.bits.mcid, in.a.bits.source, in.a.bits.opcode, in.a.bits.address)
+      }
 
       scheduler.io.in <> in
       out <> scheduler.io.out
@@ -271,13 +287,19 @@ class InclusiveCache(
     periodReset := periodCount >= mmio.module.io.periodLen
     periodCount := Mux(periodReset || !mmio.module.io.enGlobal, 0.U, periodCount + 1.U)
 
-    val activeAcquires = mods.map( sched => {
+    val activeAcquires = mods.zip(node.edges.in).map( case (sched, edgeIn) => {
       val didBankFireAcquire = sched.io.out.a.fire
       val firedRCID = WireDefault(nRCID.U)
       val firedMCID = WireDefault(nMCID.U)
       val dramBankTarget = WireDefault(nDramBanks.U)
+      // serial_tl is some client, we should exclude it from our control
+      // for some reason it traverses the LLC
+      // i still don't really know what it is, but it isn't a core
+      val isSerialSrc = edgeIn.client.clients.filter(_.name.startsWith("serial_tl_"))
+          .map(c => c.sourceId.contains(sched.io.out.a.bits.source))
+          .reduce(_||_)
 
-      when ( didBankFireAcquire ) {
+      when ( didBankFireAcquire && !isSerialSrc ) {
         firedRCID := sched.io.out.a.bits.rcid
         firedMCID := sched.io.out.a.bits.mcid
         dramBankTarget := ( sched.io.out.a.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
