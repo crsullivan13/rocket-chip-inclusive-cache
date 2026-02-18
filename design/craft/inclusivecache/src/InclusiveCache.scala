@@ -287,7 +287,7 @@ class InclusiveCache(
     periodReset := periodCount >= mmio.module.io.periodLen
     periodCount := Mux(periodReset || !mmio.module.io.enGlobal, 0.U, periodCount + 1.U)
 
-    val activeAcquires = mods.zip(node.edges.in).map( case (sched, edgeIn) => {
+    val activeAcquires = mods.zip(node.edges.in).map{ case (sched, edgeIn) =>
       val didBankFireAcquire = sched.io.out.a.fire
       val firedRCID = WireDefault(nRCID.U)
       val firedMCID = WireDefault(nMCID.U)
@@ -307,7 +307,7 @@ class InclusiveCache(
       }
 
       (firedRCID: UInt, firedMCID: UInt, dramBankTarget: UInt)
-    })
+    }
 
     for ( i <- 0 until nMCID ) {
       val didMCIDFireAcquire = activeAcquires.map{ case (_, mcid, _) => mcid === i.U }.reduce(_||_)
