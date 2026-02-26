@@ -73,7 +73,7 @@ class InclusiveCache(
     device = regulationDevice,
     beatBytes = 8)
 
-  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 16)) // TODO make number of domains one parameter everywhere
+  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 8)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
