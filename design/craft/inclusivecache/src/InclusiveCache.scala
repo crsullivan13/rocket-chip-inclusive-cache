@@ -251,6 +251,8 @@ class InclusiveCache(
       firedDomainId
     })
 
+    val throttleRegs = Reg(Vec(nDomains, Bool()))
+
     for ( i <- 0 until nDomains ) {
       val didDomainFireAcquire = activeAcquireDomains.map( id => id === i.U ).reduce(_||_)
       val didDomainFireRelease = activeReleaseDomains.map( id => id === i.U ).reduce(_||_)
@@ -264,9 +266,11 @@ class InclusiveCache(
         printf("Domain %d reg count: %d\n", i.U, outerAcquireCount(i.U))
       }
 
-      mods.foreach( sched => sched.io.throttle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal )
+      val throttleBit = (outerAcquireCount(i) >= acquireBudget(i)) && enGlobal
+      throttleRegs(i) := throttleBit
+      mods.foreach( sched => sched.io.throttle(i.U) := throttleRegs(i) )
 
-      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i.U) >= acquireBudget(i.U)) && enGlobal
+      dramRegNode.bundle.nThrottle(i.U) := throttleRegs(i)
     }
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
