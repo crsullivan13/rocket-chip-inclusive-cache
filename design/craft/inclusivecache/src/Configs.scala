@@ -81,10 +81,10 @@ class WithInclusiveCache(
     val ibus = context.ibus
     val InclusiveCacheParams(
       ways,
+      sets,
       nDomains,
       nDramBanks,
       dramBankOffset,
-      sets,
       writeBytes,
       portFactor,
       memCycles,
