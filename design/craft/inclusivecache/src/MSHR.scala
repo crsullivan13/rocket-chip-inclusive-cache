@@ -51,7 +51,6 @@ class MSHRStatus(params: InclusiveCacheParameters) extends InclusiveCacheBundle(
   val blockC = Bool()
   val nestC  = Bool()
   val domainId = UInt(2.W)
-  val requeue = Bool()
 }
 
 class NestedWriteback(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -98,17 +97,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val nestedwb  = Flipped(new NestedWriteback(params))
 
     val throttle = Input(Vec(4, Bool()))
-    val requeue = Input(Bool())
-    val clearRequeue = Input(Bool())
-    val requeueRequest = Output(Valid(new FullRequest(params)))
   })
 
   val request_valid = RegInit(false.B)
   val request = Reg(new FullRequest(params))
   val meta_valid = RegInit(false.B)
   val meta = Reg(new DirectoryResult(params))
-
-  val requeue = RegInit(false.B)
 
   // Define which states are valid
   when (meta_valid) {
@@ -173,7 +167,6 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Scheduler status
   io.status.bits.domainId := request.domainId
-  io.status.bits.requeue := requeue
   io.status.valid := request_valid
   io.status.bits.set    := request.set
   io.status.bits.tag    := request.tag
@@ -205,7 +198,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.e.valid := !s_grantack && w_grantfirst
   io.schedule.bits.x.valid := !s_flush && w_releaseack
   io.schedule.bits.dir.valid := (!s_release && w_rprobeackfirst) || (!s_writeback && no_wait)
-  io.schedule.bits.reload := no_wait && !(io.directory.valid)
+  io.schedule.bits.reload := no_wait
   io.schedule.valid := (io.schedule.bits.a.valid || io.schedule.bits.b.valid || io.schedule.bits.c.valid ||
                        io.schedule.bits.d.valid || io.schedule.bits.e.valid || io.schedule.bits.x.valid ||
                        io.schedule.bits.dir.valid) //&& !(io.throttle(request.domainId)) // io.schedule.bits.a.bits.domainId when setup
@@ -234,7 +227,6 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Resulting meta-data
   val final_meta_writeback = WireInit(meta)
-  val requeue_meta = WireInit(meta)
 
   val req_clientBit = params.clientBit(request.source)
   val req_needT = needT(request.opcode, request.param)
@@ -526,8 +518,7 @@ class MSHR(params: InclusiveCacheParameters) extends Module
 
   // Bootstrap new requests
   val allocate_as_full = WireInit(new FullRequest(params), init = io.allocate.bits)
-  val new_meta = Mux(io.allocate.valid && io.allocate.bits.repeat && requeue, requeue_meta, 
-                  Mux(io.allocate.valid && io.allocate.bits.repeat, final_meta_writeback, io.directory.bits))
+  val new_meta = Mux(io.allocate.valid && io.allocate.bits.repeat, final_meta_writeback, io.directory.bits)
   val new_request = Mux(io.allocate.valid, allocate_as_full, request)
   val new_needT = needT(new_request.opcode, new_request.param)
   val new_clientBit = params.clientBit(new_request.source)
@@ -668,34 +659,5 @@ class MSHR(params: InclusiveCacheParameters) extends Module
         s_writeback := false.B
       }
     }
-  }
-
-  requeue := Mux(io.requeue && request_valid, true.B, Mux(io.clearRequeue, false.B, requeue))
-
-  io.requeueRequest.valid := request_valid
-  io.requeueRequest.bits := request
-  when (io.requeue && request_valid) {
-    request_valid := false.B
-    meta_valid := false.B
-
-    s_rprobe         := true.B
-    w_rprobeackfirst := true.B
-    w_rprobeacklast  := true.B
-    s_release        := true.B
-    w_releaseack     := true.B
-    s_pprobe         := true.B
-    s_acquire        := true.B
-    s_flush          := true.B
-    w_grantfirst     := true.B
-    w_grantlast      := true.B
-    w_grant          := true.B
-    w_pprobeackfirst := true.B
-    w_pprobeacklast  := true.B
-    w_pprobeack      := true.B
-    s_probeack       := true.B
-    s_grantack       := true.B
-    s_execute        := true.B
-    w_grantack       := true.B
-    s_writeback      := true.B
   }
 }

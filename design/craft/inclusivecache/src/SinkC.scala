@@ -136,18 +136,6 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     params.ccover(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
     params.ccover(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
 
-    when (c.valid && !raw_resp && req_block) {
-      printf("SINKC_REQ_STALL No MSHR available to sink request\n")
-    }
-
-    when (c.valid && !raw_resp && buf_block) {
-      printf("SINKC_BUF_STALL No space in putbuffer for beat\n")
-    }
-
-    when (c.valid && !raw_resp && set_block) {
-      printf("SINKC_SET_STALL No space in putbuffer for request\n")
-    }
-
     io.perfStall.didEventOccur := false.B
     io.perfStall.domainId := 4.U
     when ( c.valid && !raw_resp && ( req_block || buf_block || set_block ) ) {

@@ -125,7 +125,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
   // Consider scheduling an MSHR only if all the resources it requires are available
-  val mshr_request = Cat((mshrs zip mshr_stall).zipWithIndex.map { case ((m, s), i) => {
+  val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) => {
       val base = m.io.schedule.valid && !s &&
         (sourceA.io.domainReadys(m.io.schedule.bits.a.bits.domainId) || !m.io.schedule.bits.a.valid) &&
         (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
@@ -143,7 +143,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
       //   }
       val noThrottle = !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId))
 
-      (base && noThrottle) || (!s && !m.io.schedule.valid && m.io.status.bits.requeue && requests.io.valid(params.mshrs * 0 + i))
+      base && noThrottle
     }
   }.reverse)
 
@@ -203,8 +203,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // If no MSHR has been assigned to this set, we need to allocate one
   val setMatches = Cat(mshrs.map { m => m.io.status.valid && m.io.status.bits.set === request.bits.set }.reverse)
-  val requeueSetMatchesAlloc = Cat(mshrs.map { m => m.io.status.bits.requeue && !m.io.status.valid && m.io.status.bits.set === request.bits.set }.reverse)
-  val alloc = !requeueSetMatchesAlloc.orR && !setMatches.orR // NOTE: no matches also means no BC or C pre-emption on this set
+  val alloc = !setMatches.orR // NOTE: no matches also means no BC or C pre-emption on this set
   // If a same-set MSHR says that requests of this type must be blocked (for bounded time), do it
   val blockB = Mux1H(setMatches, mshrs.map(_.io.status.bits.blockB)) && request.bits.prio(1)
   val blockC = Mux1H(setMatches, mshrs.map(_.io.status.bits.blockC)) && request.bits.prio(2)
@@ -214,7 +213,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val nestC  = Mux1H(setMatches, mshrs.map(_.io.status.bits.nestC))  && request.bits.prio(2)
   // Prevent priority inversion; we may not queue to MSHRs beyond our level
   val prioFilter = Cat(request.bits.prio(2), !request.bits.prio(0), ~0.U((params.mshrs-2).W))
-  val lowerMatches = Mux(setMatches.orR, setMatches & prioFilter, requeueSetMatchesAlloc & prioFilter)
+  val lowerMatches = setMatches & prioFilter
   // If we match an MSHR <= our priority that neither blocks nor nests us, queue to it.
   val queue = lowerMatches.orR && !nestB && !nestC && !blockB && !blockC
 
@@ -262,9 +261,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // Repeat the above logic, but without the fan-in
   mshrs.zipWithIndex.foreach { case (m, i) =>
-    val a_pop = requests.io.valid(params.mshrs * 0 + i)
-    val sel = mshr_selectOH(i) //|| (m.io.status.bits.requeue && a_pop)
+    val sel = mshr_selectOH(i)
     m.io.schedule.ready := sel
+    val a_pop = requests.io.valid(params.mshrs * 0 + i)
     val b_pop = requests.io.valid(params.mshrs * 1 + i)
     val c_pop = requests.io.valid(params.mshrs * 2 + i)
     val bypassMatches = lowerMatches1(i) &&
@@ -276,7 +275,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     m.io.allocate.bits.set := m.io.status.bits.set
     m.io.allocate.bits.repeat := m.io.allocate.bits.tag === m.io.status.bits.tag
     m.io.allocate.valid := sel && will_reload
-    m.io.clearRequeue := !a_pop && m.io.status.bits.requeue
   }
 
   // Determine which of the queued requests to pop (supposing will_pop)
@@ -292,7 +290,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val mshr_uses_directory = will_reload && scheduleTag =/= Mux(bypass, request.bits.tag, requests.io.data.tag)
 
   // Is there an MSHR free for this request?
-  val mshr_validOH = Cat(mshrs.map(m => m.io.status.valid || (!m.io.status.valid && m.io.status.bits.requeue)).reverse)
+  val mshr_validOH = Cat(mshrs.map(_.io.status.valid).reverse)
   val mshr_free = (~mshr_validOH & prioFilter).orR
 
   // Fanout the request to the appropriate handler (if any)
@@ -314,52 +312,14 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
 
-  // Consider scheduling an MSHR only if all the resources it requires are available
-  val mshr_requeue = Cat((mshrs zip mshr_stall).map { case (m, s) => {
-      val noThrottle = (m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.domainId) && m.io.status.valid && 
-                        m.io.requeueRequest.bits.opcode === TLMessages.AcquireBlock && m.io.requeueRequest.valid)
-      noThrottle
-    }
-  }.reverse)
-
-  // Round-robin arbitration of MSHRs
-  val requeue_robin_filter = RegInit(0.U(params.mshrs.W))
-  val requeue_robin_request = Cat(mshr_requeue, mshr_requeue & requeue_robin_filter)
-  val requeue_mshr_selectOH2 = ~(leftOR(requeue_robin_request) << 1) & requeue_robin_request
-  val requeue_mshr_selectOH = requeue_mshr_selectOH2(2*params.mshrs-1, params.mshrs) | requeue_mshr_selectOH2(params.mshrs-1, 0)
-  val requeue_mshr_select = OHToUInt(requeue_mshr_selectOH)
-  val requeue_schedule = Mux1H(requeue_mshr_selectOH, mshrs.map(_.io.requeueRequest))
-  val requeue_mshr = Mux1H(requeue_mshr_selectOH, mshrs.map(_.io.requeue))
-  val requeue_scheduleTag = Mux1H(requeue_mshr_selectOH, mshrs.map(_.io.status.bits.tag))
-  val requeue_scheduleSet = Mux1H(requeue_mshr_selectOH, mshrs.map(_.io.status.bits.set))
-
-  // When an MSHR wins the schedule, it has lowest priority next time
-  when (mshr_requeue.orR) { requeue_robin_filter := ~rightOR(requeue_mshr_selectOH) }
-
-  val normalRequest = request.valid && queue && !bypassQueue
-  val requeueSetMatches = Cat(mshrs.map { m => m.io.status.valid && m.io.status.bits.set === requeue_scheduleSet }.reverse)
-
-  // mshrs.foreach { m => m.io.requeue := false.B }
-  // when (!normalRequest && mshr_requeue.orR) {
-  //   requeue_mshr := true.B
-  // }
-  mshrs.zipWithIndex.foreach { case (m, i) =>
-    m.io.requeue := !normalRequest && requeue_mshr_selectOH(i) && requests.io.push.ready
-    // when (!normalRequest && requeue_mshr_selectOH(i) && requests.io.push.ready) {
-    //   printf("Requeue opdcode is %d prio bits are %d%d%d\n", m.io.requeueRequest.bits.opcode, m.io.requeueRequest.bits.prio(2),  
-    //                                                                                           m.io.requeueRequest.bits.prio(1),
-    //                                                                                            m.io.requeueRequest.bits.prio(0))
-    // }
-  }
-
   // Enqueue the request if not bypassed directly into an MSHR
-  requests.io.push.valid := normalRequest || (!normalRequest && mshr_requeue.orR)
-  requests.io.push.bits.data  := Mux(normalRequest, request.bits, requeue_schedule.bits)
-  requests.io.push.bits.index := Mux(normalRequest, Mux1H(
+  requests.io.push.valid := request.valid && queue && !bypassQueue
+  requests.io.push.bits.data  := request.bits
+  requests.io.push.bits.index := Mux1H(
     request.bits.prio, Seq(
       OHToUInt(lowerMatches1 << params.mshrs*0),
       OHToUInt(lowerMatches1 << params.mshrs*1),
-      OHToUInt(lowerMatches1 << params.mshrs*2))), OHToUInt(requeueSetMatches << params.mshrs*0))
+      OHToUInt(lowerMatches1 << params.mshrs*2)))
 
   val mshr_insertOH = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>
