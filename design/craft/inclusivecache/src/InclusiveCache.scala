@@ -207,7 +207,9 @@ class InclusiveCache(
     }
 
     val enGlobal = RegInit(0.B)
+    val perfEnable = RegInit(0.B)
 
+    val perfRefillPerBank = Seq.fill(nDomains)(Reg(Vec(nDramBanks, UInt(64.W))))
     val outerAcquireCount = Seq.fill(nDomains)(Reg(Vec(nDramBanks, UInt(64.W))))
     val acquireBudget = Reg(Vec(nDomains,UInt(64.W)))
 
@@ -240,6 +242,7 @@ class InclusiveCache(
       for ( j <- 0 until nDramBanks ) {
         val didTargetBank = activeAcquireDomains.map{ case (_, bank) => bank === j.U }.reduce(_||_) && didDomainFireAcquire
         outerAcquireCount(i)(j) := Mux(periodReset || !enGlobal, 0.U + didTargetBank, didTargetBank + outerAcquireCount(i)(j))
+        perfRefillPerBank(i)(j) := Mux(perfEnable, didTargetBank + perfRefillPerBank(i)(j), 0.U)
 
         val throttleBit = (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal
         throttleRegs(i)(j) := throttleBit
@@ -255,10 +258,20 @@ class InclusiveCache(
     val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(64, reg,
         RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
 
+    val perfEnableField = RegField(perfEnable.getWidth, perfEnable, RegFieldDesc("perfEnable", "Perf counter enable"))
+
+    val perfRefillPerBankFields = perfRefillPerBank.zipWithIndex.flatMap { case (domainVec, i) =>
+      domainVec.zipWithIndex.map { case (reg, j) =>
+        RegField.r(64, reg, RegFieldDesc(s"perfRefillPerBank_d${i}_b${j}", s"Perf refills domain $i bank $j"))
+      }
+    }
+
     regnode.regmap(
       0x000 -> Seq(enGlobalField),
       0x008 -> Seq(periodLenRegField),
       0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
+      0x030 -> Seq(perfEnableField),
+      0x038 -> RegFieldGroup("PerfRefillPerBank", Some("Per-domain per-bank refill counters"), perfRefillPerBankFields),
     )
 
     ctrls.foreach { ctrl =>
