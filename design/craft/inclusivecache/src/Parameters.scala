@@ -296,8 +296,7 @@ object InclusiveCacheParameters
   def out_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int = {
     // We need 2-3 normal MSHRs to cover the Directory latency
     // To fully exploit memory bandwidth-delay-product, we need memCyles/blockBeats MSHRs
-    //max(if (micro.dirReg) 3 else 2, (micro.memCycles + cache.blockBeats - 1) / cache.blockBeats)
-    24
+    max(if (micro.dirReg) 3 else 2, (micro.memCycles + cache.blockBeats - 1) / cache.blockBeats)
   }
   def all_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int =
     // We need a dedicated MSHR for B+C each
