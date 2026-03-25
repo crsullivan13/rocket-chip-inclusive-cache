@@ -73,7 +73,22 @@ class InclusiveCache(
     device = regulationDevice,
     beatBytes = 8)
 
-  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(4, 8)) // TODO make number of domains one parameter everywhere
+  val nDomains = p(BRUKey) match {
+    case Some(params) => params.nDomains
+    case None => cache.nDomains
+  }
+
+  val nDramBanks = p(BRUKey) match {
+    case Some(params) => params.nDramBanks
+    case None => cache.nDramBanks
+  }
+
+  val dramBankOffset = p(BRUKey) match {
+    case Some(params) => params.dramBankOffset
+    case None => cache.dramBankOffset
+  }
+
+  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(nDomains, nDramBanks)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -156,21 +171,6 @@ class InclusiveCache(
         println(s"\t${i} <= ${c.name}")
       }
       println("")
-    }
-
-    val nDomains = p(BRUKey) match {
-      case Some(params) => params.nDomains
-      case None => cache.nDomains
-    }
-
-    val nDramBanks = p(BRUKey) match {
-      case Some(params) => params.nDramBanks
-      case None => cache.nDramBanks
-    }
-
-    val dramBankOffset = p(BRUKey) match {
-      case Some(params) => params.dramBankOffset
-      case None => cache.dramBankOffset
     }
 
     // Create the L2 Banks
