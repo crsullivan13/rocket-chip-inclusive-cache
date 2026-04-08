@@ -23,7 +23,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 
-import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey}
+import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey, BRUKey}
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
@@ -42,8 +42,8 @@ class PerfEvents() extends Bundle {
   val sinkCStall = new PerfEventInfo()
 }
 
-class ThrottleBundle() extends Bundle {
-  val dramBank = Vec(8, Bool())
+class ThrottleBundle(nDramBanks: Int) extends Bundle {
+  val dramBank = Vec(nDramBanks, Bool())
 }
 
 // class OuterReleaseInfo() extends Bundle {
@@ -73,7 +73,22 @@ class InclusiveCache(
     device = regulationDevice,
     beatBytes = 8)
 
-  val dramRegNode = BundleBridgeSource(() => new BRUTileIO(4)) // TODO make number of domains one parameter everywhere
+  val nDomains = p(BRUKey) match {
+    case Some(params) => params.nDomains
+    case None => cache.nDomains
+  }
+
+  val nDramBanks = p(BRUKey) match {
+    case Some(params) => params.nDramBanks
+    case None => cache.nDramBanks
+  }
+
+  val dramBankOffset = p(BRUKey) match {
+    case Some(params) => params.dramBankOffset
+    case None => cache.dramBankOffset
+  }
+
+  val dramRegNode = BundleBridgeSource(() => new BRUPerBankTileIO(nDomains, nDramBanks)) // TODO make number of domains one parameter everywhere
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -158,18 +173,6 @@ class InclusiveCache(
       println("")
     }
 
-    val perBankEvent = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, new PerfEventInfo()))
-    val nDomains = 4
-    val nDramBanks = 8
-    val dramBankOffset = 16
-
-    val perfEnable = RegInit(false.B)
-    val perfLineRefill = Reg(Vec(nDomains, UInt(64.W)))
-    val perfWriteBack = Reg(Vec(nDomains, UInt(64.W)))
-    val perfSinkAStall = Reg(Vec(nDomains, UInt(64.W)))
-    val perfMSHRHeadStall = Reg(UInt(64.W))
-    // val perfSinkCStall = Reg(Vec(nDomains, UInt(64.W)))
-
     // Create the L2 Banks
     val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
       edgeOut.manager.managers.foreach { m =>
@@ -182,16 +185,12 @@ class InclusiveCache(
       }
 
       val params = InclusiveCacheParameters(cache, micro, !ctrls.isEmpty, edgeIn, edgeOut)
-      val scheduler = Module(new InclusiveCacheBankScheduler(params)).suggestName("inclusive_cache_bank_sched")
+      val scheduler = Module(new InclusiveCacheBankScheduler(params, nDomains, nDramBanks, dramBankOffset)).suggestName("inclusive_cache_bank_sched")
 
       scheduler.io.in <> in
       out <> scheduler.io.out
       scheduler.io.ways := DontCare
       scheduler.io.divs := DontCare
-      scheduler.io.perfEnable := perfEnable
-
-      perBankEvent(i.U).didEventOccur := scheduler.io.perfEvents.sinkAStall.didEventOccur
-      perBankEvent(i.U).domainId := scheduler.io.perfEvents.sinkAStall.domainId
 
       // Tie down default values in case there is no controller
       scheduler.io.req.valid := false.B
@@ -208,7 +207,9 @@ class InclusiveCache(
     }
 
     val enGlobal = RegInit(0.B)
+    val perfEnable = RegInit(0.B)
 
+    val perfRefillPerBank = Seq.fill(nDomains)(Reg(Vec(nDramBanks, UInt(64.W))))
     val outerAcquireCount = Seq.fill(nDomains)(Reg(Vec(nDramBanks, UInt(64.W))))
     val acquireBudget = Reg(Vec(nDomains,UInt(64.W)))
 
@@ -219,22 +220,10 @@ class InclusiveCache(
     periodReset := periodCount >= periodLength
     periodCount := Mux(periodReset || !enGlobal, 0.U, periodCount + 1.U)
 
-    for ( i <- 0 until nDomains) {
-      val anySinkAStall = perBankEvent.map(_.didEventOccur).reduce(_||_)
-      val domain = perBankEvent.map(_.domainId === i.U).reduce(_||_)
-      perfSinkAStall(i.U) := Mux(perfEnable, Mux(!domain, 0.U + perfSinkAStall(i.U), anySinkAStall + perfSinkAStall(i.U)), 0.U)
-    }
-
-    // val acquireDRAMBank = Wire(Vec(p(SubsystemBankedCoherenceKey).nBanks, UInt(3.W)))
-
     val activeAcquireDomains = mods.map( sched => {
       val didBankFireAcquire = sched.io.out.a.fire
       val firedDomainId = WireDefault(nDomains.U)
       val dramBankTarget = WireDefault(nDramBanks.U)
-
-      when ( sched.io.mshrHeadBlock ) {
-        perfMSHRHeadStall := perfMSHRHeadStall + 1.U
-      }
 
       when ( didBankFireAcquire ) {
         firedDomainId := sched.io.out.a.bits.domainId
@@ -245,36 +234,21 @@ class InclusiveCache(
       (firedDomainId: UInt, dramBankTarget: UInt)
     })
 
-    val activeReleaseDomains = mods.map( sched => {
-      val didBankFireRelease = node.out(0)._2.last(sched.io.out.c) && sched.io.out.c.bits.opcode === TLMessages.ReleaseData
-      val firedDomainId = WireDefault(nDomains.U)
-
-      when ( didBankFireRelease ) {
-        firedDomainId := sched.io.out.c.bits.domainId
-        printf("LLC: write out fired domain %d\n", firedDomainId)
-      }
-
-      when ( sched.io.in.c.fire ) {
-        printf("LLC: write in fired domain %d\n", sched.io.in.c.bits.domainId)
-      }
-
-      firedDomainId
-    })
+    val throttleRegs = Reg(Vec(nDomains, Vec(nDramBanks, Bool())))
 
     for ( i <- 0 until nDomains ) {
       val didDomainFireAcquire = activeAcquireDomains.map{ case (id, _) => id === i.U }.reduce(_||_)
-      val didDomainFireRelease = activeReleaseDomains.map( id => id === i.U ).reduce(_||_)
 
       for ( j <- 0 until nDramBanks ) {
         val didTargetBank = activeAcquireDomains.map{ case (_, bank) => bank === j.U }.reduce(_||_) && didDomainFireAcquire
         outerAcquireCount(i)(j) := Mux(periodReset || !enGlobal, 0.U + didTargetBank, didTargetBank + outerAcquireCount(i)(j))
-        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := ( (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal ) )
+        perfRefillPerBank(i)(j) := Mux(perfEnable, didTargetBank + perfRefillPerBank(i)(j), 0.U)
+
+        val throttleBit = (outerAcquireCount(i)(j) >= acquireBudget(i)) && enGlobal
+        throttleRegs(i)(j) := throttleBit
+        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := throttleRegs(i)(j) )
+        dramRegNode.bundle.nThrottle(i)(j) := throttleBit
       }
-
-      perfLineRefill(i.U) := Mux(perfEnable, didDomainFireAcquire + perfLineRefill(i.U), 0.U)
-      perfWriteBack(i.U) := Mux(perfEnable, didDomainFireRelease + perfWriteBack(i.U), 0.U)
-
-      dramRegNode.bundle.nThrottle(i.U) := (outerAcquireCount(i)(0.U) >= acquireBudget(i.U)) && enGlobal
     }
 
     val enGlobalField = RegField(enGlobal.getWidth, enGlobal, RegFieldDesc("enGlobal", "Global Enable"))
@@ -284,28 +258,20 @@ class InclusiveCache(
     val maxReadRegField = acquireBudget.zipWithIndex.map { case (reg, i) => RegField(64, reg,
         RegFieldDesc(s"acquireBudget$i", s"Read budget for domain $i")) }
 
-    val perfEnField = RegField(perfEnable.getWidth, perfEnable, RegFieldDesc("perfEnable", "Perf counter enable"))
+    val perfEnableField = RegField(perfEnable.getWidth, perfEnable, RegFieldDesc("perfEnable", "Perf counter enable"))
 
-    val lineRefillRegField = perfLineRefill.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
-        RegFieldDesc(s"lineRefill$i", s"Line refill count for domain $i")) }
-
-    val writeBackRegField = perfWriteBack.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
-        RegFieldDesc(s"writeBack$i", s"Write back count for domain $i")) }
-
-    val sinkAStallRegField = perfSinkAStall.zipWithIndex.map { case (reg, i) => RegField.r(64, reg,
-        RegFieldDesc(s"sinkAStall$i", s"Sink A stall cycles for domain $i")) }
-
-    val mshrHeadBlockRegField = RegField(perfMSHRHeadStall.getWidth, perfMSHRHeadStall, RegFieldDesc("perfMSHRHeadStall", "Perf mshr head stall"))
+    val perfRefillPerBankFields = perfRefillPerBank.zipWithIndex.flatMap { case (domainVec, i) =>
+      domainVec.zipWithIndex.map { case (reg, j) =>
+        RegField.r(64, reg, RegFieldDesc(s"perfRefillPerBank_d${i}_b${j}", s"Perf refills domain $i bank $j"))
+      }
+    }
 
     regnode.regmap(
       0x000 -> Seq(enGlobalField),
       0x008 -> Seq(periodLenRegField),
       0x010 -> RegFieldGroup("AcquireBudget", Some("Per-domain max read config"), maxReadRegField),
-      0x650 -> Seq(perfEnField),
-      0x660 -> RegFieldGroup("LineRefill", Some("Per-domain line refill count"), lineRefillRegField),
-      0x680 -> RegFieldGroup("WriteBack", Some("Per-domain writeback count"), writeBackRegField),
-      0x700 -> RegFieldGroup("SinkAStall", Some("Per-domain sinkA stall cycle count"), sinkAStallRegField),
-      0x720 -> Seq(mshrHeadBlockRegField),
+      0x030 -> Seq(perfEnableField),
+      0x038 -> RegFieldGroup("PerfRefillPerBank", Some("Per-domain per-bank refill counters"), perfRefillPerBankFields),
     )
 
     ctrls.foreach { ctrl =>
@@ -333,4 +299,3 @@ class InclusiveCache(
     def json = s"""{"banks":[${mods.map(_.json).mkString(",")}]}"""
   }
 }
-

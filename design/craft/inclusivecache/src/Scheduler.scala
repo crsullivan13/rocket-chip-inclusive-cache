@@ -27,7 +27,7 @@ import chisel3.dontTouch
 
 import midas.targetutils.SynthesizePrintf
 
-class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Module
+class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nDomains: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
 {
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(params.inner.bundle))
@@ -39,15 +39,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     val req = Flipped(Decoupled(new SinkXRequest(params)))
     val resp = Decoupled(new SourceXRequest(params))
 
-    val throttle = Input(Vec(4, new ThrottleBundle()))
-    val mshrHeadBlock = Output(Bool())
-    //val outerAcquireInfo = Output(new OuterAcquireInfo())
-
-    val perfEnable = Input(Bool())
-    val perfEvents = Output(new PerfEvents())
+    val throttle = Input(Vec(nDomains, new ThrottleBundle(nDramBanks)))
   })
 
-  val sourceA = Module(new SourceA(params))
+  val sourceA = Module(new SourceA(params, nDomains, nDramBanks, dramBankOffset))
   val sourceB = Module(new SourceB(params))
   val sourceC = Module(new SourceC(params))
   val sourceD = Module(new SourceD(params))
@@ -71,11 +66,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val sinkX = Module(new SinkX(params))
 
   sinkA.io.a <> io.in.a
-  sinkA.io.perfEnable := io.perfEnable
-  io.perfEvents.sinkAStall := sinkA.io.perfStall
   sinkC.io.c <> io.in.c
-  sinkC.io.perfEnable := io.perfEnable
-  io.perfEvents.sinkCStall := sinkC.io.perfStall
   sinkE.io.e <> io.in.e
   sinkD.io.d <> io.out.d
   sinkX.io.x <> io.req
@@ -127,9 +118,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     params.ccover(stall_abc.reduce(_||_), "SCHEDULER_ABC_INTERLOCK", "ABC MSHR interlocked due to pre-emption")
   if (!params.lastLevel)
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
-
-  val nDramBanks = 8
-  val dramBankOffset = 16
 
   // Consider scheduling an MSHR only if all the resources it requires are available
   val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) => {
@@ -333,18 +321,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory || sinkc_uses_directory
   directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
-
-  io.mshrHeadBlock := false.B
-  when ( requests.io.push.valid ) {
-    val mshrQueuedTo = OHToUInt(lowerMatches1)
-    io.mshrHeadBlock := mshrs.zipWithIndex.map{ case(m,i) =>
-      val mshrDramBankTarget = ( params.expandAddress(m.io.schedule.bits.a.bits.tag, m.io.schedule.bits.a.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-      val requestDramBankTarget = ( params.expandAddress(request.bits.tag, request.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-      val shouldThrottle = io.throttle(m.io.schedule.bits.a.bits.domainId).dramBank(mshrDramBankTarget)
-
-      ( i.U === mshrQueuedTo ) && ( mshrDramBankTarget =/= requestDramBankTarget ) && shouldThrottle
-    }.reduce(_||_)
-  }
 
   // Enqueue the request if not bypassed directly into an MSHR
   requests.io.push.valid := request.valid && queue && !bypassQueue

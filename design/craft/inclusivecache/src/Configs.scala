@@ -30,7 +30,9 @@ import sifive.blocks.inclusivecache.InclusiveCacheParameters
 case class InclusiveCacheParams(
   ways: Int,
   sets: Int,
-  numCPUs: Int,
+  nDomains: Int,
+  nDramBanks: Int,
+  dramBankOffset: Int,
   writeBytes: Int, // backing store update granularity
   portFactor: Int, // numSubBanks = (widest TL port * portFactor) / writeBytes
   memCycles: Int,  // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
@@ -55,18 +57,22 @@ class WithInclusiveCache(
   hintsSkipProbe: Boolean = false,
   bankedControl: Boolean = false,
   ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress),
-  numCPUs: Int = 2
+  nDomains: Int = 4,
+  nDramBanks: Int = 8,
+  dramBankOffset: Int = 16 // assume we have shifted it for set partitioning
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
       ways = nWays,
+      nDomains = nDomains,
+      nDramBanks = nDramBanks,
+      dramBankOffset = dramBankOffset,
       memCycles = outerLatencyCycles,
       writeBytes = site(XLen)/8,
       portFactor = subBankingFactor,
       hintsSkipProbe = hintsSkipProbe,
       bankedControl = bankedControl,
-      ctrlAddr = ctrlAddr,
-      numCPUs = numCPUs)
+      ctrlAddr = ctrlAddr)
   case SubsystemBankedCoherenceKey => up(SubsystemBankedCoherenceKey, site).copy(coherenceManager = { context =>
     implicit val p = context.p
     val sbus = context.tlBusWrapperLocationMap(SBUS)
@@ -76,7 +82,9 @@ class WithInclusiveCache(
     val InclusiveCacheParams(
       ways,
       sets,
-      numCPUs,
+      nDomains,
+      nDramBanks,
+      dramBankOffset,
       writeBytes,
       portFactor,
       memCycles,
@@ -99,8 +107,10 @@ class WithInclusiveCache(
       CacheParameters(
         level = 2,
         ways = ways,
+        nDomains = nDomains,
+        nDramBanks = nDramBanks,
+        dramBankOffset = dramBankOffset,
         sets = sets,
-        numCPUs = numCPUs,
         blockBytes = sbus.blockBytes,
         beatBytes = sbus.beatBytes,
         hintsSkipProbe = hintsSkipProbe),

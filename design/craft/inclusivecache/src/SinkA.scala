@@ -46,9 +46,6 @@ class SinkA(params: InclusiveCacheParameters) extends Module
     // for use by SourceD:
     val pb_pop  = Flipped(Decoupled(new PutBufferPop(params)))
     val pb_beat = new PutBufferAEntry(params)
-
-    val perfEnable = Input(Bool())
-    val perfStall = Output(new PerfEventInfo())
   })
 
   // No restrictions on the type of buffer
@@ -76,25 +73,6 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   val req_block = first && !io.req.ready
   val buf_block = hasData && !putbuffer.io.push.ready
   val set_block = hasData && first && !free
-
-  val internalStallCount = RegInit(0.U(64.W))
-
-  params.ccover(a.valid && req_block, "SINKA_REQ_STALL", "No MSHR available to sink request")
-  io.perfStall.didEventOccur := false.B
-  io.perfStall.domainId := 4.U
-  when ( a.valid && req_block ) {
-    io.perfStall.didEventOccur := true.B
-    io.perfStall.domainId := a.bits.domainId
-    internalStallCount := internalStallCount + 1.U
-  }
-
-  when ( a.fire && io.perfEnable ) {
-    SynthesizePrintf(printf("SinkA: fired domain %d, stalled for %d\n", a.bits.domainId, internalStallCount))
-  }
-
-  when ( a.fire ) {
-    internalStallCount := 0.U
-  }
 
   params.ccover(a.valid && buf_block, "SINKA_BUF_STALL", "No space in putbuffer for beat")
   params.ccover(a.valid && set_block, "SINKA_SET_STALL", "No space in putbuffer for request")
