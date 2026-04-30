@@ -71,7 +71,7 @@ class WithInclusiveCache(
   pfx: Int = 0,
   mrbwb: Int = 52428,
   nDramBanks: Int = 8,
-  dramBankOffset: Int = 16 // assume we have shifted it for set partitioning
+  dramBankOffset: Int = 9 // assume we have shifted it for set partitioning
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
