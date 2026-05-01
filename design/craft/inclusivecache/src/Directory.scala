@@ -45,6 +45,7 @@ class DirectoryRead(params: InclusiveCacheParameters) extends InclusiveCacheBund
 {
   val set = UInt(params.setBits.W)
   val tag = UInt(params.tagBits.W)
+  val inFlightWays = UInt(params.cache.ways.W)
 }
 
 class DirectoryResult(params: InclusiveCacheParameters) extends DirectoryEntry(params)
@@ -110,12 +111,15 @@ class Directory(params: InclusiveCacheParameters) extends Module
   val regout = params.dirReg(cc_dir.read(io.read.bits.set, ren), ren1)
   val tag = params.dirReg(RegEnable(io.read.bits.tag, ren), ren1)
   val set = params.dirReg(RegEnable(io.read.bits.set, ren), ren1)
+  val inFlightWays = params.dirReg(RegEnable(io.read.bits.inFlightWays, ren), ren1)
 
   // Compute the victim way in case of an evicition
   val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
   val victimSums = Seq.tabulate(params.cache.ways) { i => ((1 << InclusiveCacheParameters.lfsrBits)*i / params.cache.ways).U }
   val victimLTE  = Cat(victimSums.map { _ <= victimLFSR }.reverse)
-  val victimSimp = Cat(0.U(1.W), victimLTE(params.cache.ways-1, 1), 1.U(1.W))
+  val lowestFreeWay = ~inFlightWays & (inFlightWays + 1.U)
+  val victimLTEMasked = (victimLTE & ~inFlightWays) | lowestFreeWay
+  val victimSimp = Cat(0.U(1.W), victimLTEMasked(params.cache.ways-1, 0))
   val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1)
   val victimWay = OHToUInt(victimWayOH)
   assert (!ren2 || victimLTE(0) === 1.U)

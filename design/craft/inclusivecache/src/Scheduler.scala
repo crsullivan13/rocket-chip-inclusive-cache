@@ -262,9 +262,19 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val alloc_uses_directory = request.valid && request_alloc_cases
 
   // When a request goes through, it will need to hit the Directory
+  val dirReadSet = Mux(mshr_uses_directory_for_lb, scheduleSet, request.bits.set)
+  val inFlightWays = Wire(UInt(params.cache.ways.W))
+  inFlightWays := 0.U
+  when (directory.io.read.valid) {
+    inFlightWays := mshrs.map { m =>
+      Mux((m.io.status.valid && (dirReadSet === m.io.status.bits.set)), 1.U << m.io.status.bits.way, 0.U)
+    }.reduce(_|_)
+  }
+
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
-  directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
+  directory.io.read.bits.set := dirReadSet
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
+  directory.io.read.bits.inFlightWays := inFlightWays
 
   // Enqueue the request if not bypassed directly into an MSHR
   requests.io.push.valid := request.valid && queue && !bypassQueue
