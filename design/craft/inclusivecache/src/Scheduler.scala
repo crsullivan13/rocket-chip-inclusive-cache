@@ -76,7 +76,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // Deliver messages from Sinks to MSHRs
   mshrs.zipWithIndex.foreach { case (m, i) =>
-    m.io.sinkc.valid := sinkC.io.resp.valid && sinkC.io.resp.bits.set === m.io.status.bits.set
+    m.io.sinkc.valid := sinkC.io.resp.valid && sinkC.io.resp.bits.set === m.io.status.bits.set && sinkC.io.resp.bits.tag === m.io.status.bits.tag
     m.io.sinkd.valid := sinkD.io.resp.valid && sinkD.io.resp.bits.source === i.U
     m.io.sinke.valid := sinkE.io.resp.valid && sinkE.io.resp.bits.sink   === i.U
     m.io.sinkc.bits := sinkC.io.resp.bits
@@ -87,8 +87,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // If the pre-emption BC or C MSHR have a matching set, the normal MSHR must be blocked
   val mshr_stall_abc = abc_mshrs.map { m =>
-    (bc_mshr.io.status.valid && m.io.status.bits.set === bc_mshr.io.status.bits.set) ||
-    ( c_mshr.io.status.valid && m.io.status.bits.set ===  c_mshr.io.status.bits.set)
+    (bc_mshr.io.status.valid && m.io.status.bits.set === bc_mshr.io.status.bits.set && m.io.status.bits.tag === bc_mshr.io.status.bits.tag) ||
+    ( c_mshr.io.status.valid && m.io.status.bits.set ===  c_mshr.io.status.bits.set && m.io.status.bits.tag ===  c_mshr.io.status.bits.tag)
   }
   val mshr_stall_bc =
     c_mshr.io.status.valid && bc_mshr.io.status.bits.set === c_mshr.io.status.bits.set
@@ -169,18 +169,18 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   sinkA.io.req.ready := directory.io.ready && request.ready && !sinkC.io.req.valid && !sinkX.io.req.valid
 
   // If no MSHR has been assigned to this set, we need to allocate one
-  val setMatches = Cat(mshrs.map { m => m.io.status.valid && m.io.status.bits.set === request.bits.set }.reverse)
-  val alloc = !setMatches.orR // NOTE: no matches also means no BC or C pre-emption on this set
+  val tagMatches = Cat(mshrs.map { m => m.io.status.valid && m.io.status.bits.set === request.bits.set && m.io.status.bits.tag === request.bits.tag }.reverse)
+  val alloc = !tagMatches.orR // NOTE: no matches also means no BC or C pre-emption on this set
   // If a same-set MSHR says that requests of this type must be blocked (for bounded time), do it
-  val blockB = Mux1H(setMatches, mshrs.map(_.io.status.bits.blockB)) && request.bits.prio(1)
-  val blockC = Mux1H(setMatches, mshrs.map(_.io.status.bits.blockC)) && request.bits.prio(2)
+  val blockB = Mux1H(tagMatches, mshrs.map(_.io.status.bits.blockB)) && request.bits.prio(1)
+  val blockC = Mux1H(tagMatches, mshrs.map(_.io.status.bits.blockC)) && request.bits.prio(2)
   // If a same-set MSHR says that requests of this type must be handled out-of-band, use special BC|C MSHR
   // ... these special MSHRs interlock the MSHR that said it should be pre-empted.
-  val nestB  = Mux1H(setMatches, mshrs.map(_.io.status.bits.nestB))  && request.bits.prio(1)
-  val nestC  = Mux1H(setMatches, mshrs.map(_.io.status.bits.nestC))  && request.bits.prio(2)
+  val nestB  = Mux1H(tagMatches, mshrs.map(_.io.status.bits.nestB))  && request.bits.prio(1)
+  val nestC  = Mux1H(tagMatches, mshrs.map(_.io.status.bits.nestC))  && request.bits.prio(2)
   // Prevent priority inversion; we may not queue to MSHRs beyond our level
   val prioFilter = Cat(request.bits.prio(2), !request.bits.prio(0), ~0.U((params.mshrs-2).W))
-  val lowerMatches = setMatches & prioFilter
+  val lowerMatches = tagMatches & prioFilter
   // If we match an MSHR <= our priority that neither blocks nor nests us, queue to it.
   val queue = lowerMatches.orR && !nestB && !nestC && !blockB && !blockC
 
