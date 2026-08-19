@@ -299,7 +299,7 @@ object MetaData
 object InclusiveCacheParameters
 {
   val lfsrBits = 10
-  val L2ControlAddress = 0x2010000
+  val L2ControlAddress = BigInt(0x2010000L)
   val L2ControlSize = 0x1000
   def out_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int = {
     // We need 2-3 normal MSHRs to cover the Directory latency

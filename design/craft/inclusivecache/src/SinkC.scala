@@ -145,19 +145,19 @@ class SinkC(params: InclusiveCacheParameters) extends Module
 
     val put = Mux(first, freeIdx, RegEnable(freeIdx, first))
 
-    io.req.bits.prio   := VecInit(4.U(3.W).asBools)
-    io.req.bits.control:= false.B
-    io.req.bits.opcode := c.bits.opcode
-    io.req.bits.param  := c.bits.param
-    io.req.bits.size   := c.bits.size
-    io.req.bits.source := c.bits.source
-    io.req.bits.offset := offset
-    io.req.bits.set    := set
-    io.req.bits.tag    := tag
-    io.req.bits.put    := put
-    //io.req.bits.domainId := c.bits.domainId
-    io.req.bits.rcid := 0.U
-    io.req.bits.mcid := 0.U
+    io.req.bits.prio               := VecInit(4.U(3.W).asBools)
+    io.req.bits.control.flush      := false.B
+    io.req.bits.control.invalidate := false.B
+    io.req.bits.opcode             := c.bits.opcode
+    io.req.bits.param              := c.bits.param
+    io.req.bits.size               := c.bits.size
+    io.req.bits.source             := c.bits.source
+    io.req.bits.offset             := offset
+    io.req.bits.set                := set
+    io.req.bits.tag                := tag
+    io.req.bits.put                := put
+    io.req.bits.rcid               := 0.U
+    io.req.bits.mcid               := 0.U
 
     putbuffer.io.push.bits.index := put
     putbuffer.io.push.bits.data.data    := c.bits.data

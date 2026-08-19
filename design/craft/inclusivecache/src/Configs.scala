@@ -24,6 +24,7 @@ import freechips.rocketchip.rocket._
 import freechips.rocketchip.tilelink._
 import sifive.blocks.inclusivecache._
 import freechips.rocketchip.devices.tilelink._
+import freechips.rocketchip.prci.{ClockCrossingType, NoCrossing}
 import freechips.rocketchip.util._
 import sifive.blocks.inclusivecache.InclusiveCacheParameters
 
@@ -45,7 +46,8 @@ case class InclusiveCacheParams(
   memCycles: Int,  // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
   physicalFilter: Option[PhysicalFilterParams] = None,
   bankedControl: Boolean = false, // bank the cache ctrl with the cache banks
-  ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress),
+  ctrlAddr: Option[BigInt] = Some(InclusiveCacheParameters.L2ControlAddress),
+  ctrlXType: ClockCrossingType = NoCrossing, // crossing between cbus and the L2's (sbus-clocked) control ports
   // Interior/Exterior refer to placement either inside the Scheduler or outside it
   // Inner/Outer refer to buffers on the front (towards cores) or back (towards DDR) of the L2
   bufInnerInterior: InclusiveCachePortParameters = InclusiveCachePortParameters.fullC,
@@ -62,7 +64,9 @@ class WithInclusiveCache(
   subBankingFactor: Int = 4,
   hintsSkipProbe: Boolean = false,
   bankedControl: Boolean = false,
-  ctrlAddr: Option[Int] = Some(InclusiveCacheParameters.L2ControlAddress),
+  ctrlAddr: Option[BigInt] = Some(InclusiveCacheParameters.L2ControlAddress),
+  ctrlXType: ClockCrossingType = NoCrossing,
+  writeBytes: Int = 8,
   nRCID: Int = 16,
   nMCID: Int = 16,
   cbqriVer: Int = 1,
@@ -87,10 +91,11 @@ class WithInclusiveCache(
       nDramBanks = nDramBanks,
       dramBankOffset = dramBankOffset,
       memCycles = outerLatencyCycles,
-      writeBytes = site(XLen)/8,
+      writeBytes = writeBytes,
       portFactor = subBankingFactor,
       bankedControl = bankedControl,
-      ctrlAddr = ctrlAddr)
+      ctrlAddr = ctrlAddr,
+      ctrlXType = ctrlXType)
   case SubsystemBankedCoherenceKey => up(SubsystemBankedCoherenceKey, site).copy(coherenceManager = { context =>
     implicit val p = context.p
     val sbus = context.tlBusWrapperLocationMap(SBUS)
@@ -116,6 +121,7 @@ class WithInclusiveCache(
       physicalFilter,
       bankedControl,
       ctrlAddr,
+      ctrlXType,
       bufInnerInterior,
       bufInnerExterior,
       bufOuterInterior,
@@ -179,14 +185,16 @@ class WithInclusiveCache(
       case Some(fp) => {
         val physicalFilter = LazyModule(new PhysicalFilter(fp.copy(controlBeatBytes = cbus.beatBytes)))
         lastLevelNode :*= physicalFilter.node :*= l2_outer_buffer.node
-        physicalFilter.controlNode := cbus.coupleTo("physical_filter") {
-          TLBuffer(1) := TLFragmenter(cbus, Some("LLCPhysicalFilter")) := _
+        physicalFilter.controlNode := LazyScope("physical_filter_xing", "TLPhysicalFilterCtrlCrossing") {
+          TLBuffer(1) := TLFragmenter(cbus, Some("LLCPhysicalFilter")) := cbus.crossOutHelper(ctrlXType)
         }
       }
     }
 
     l2.ctrls.foreach {
-      _.ctrlnode := cbus.coupleTo("l2_ctrl") { TLBuffer(1) := TLFragmenter(cbus, Some("LLCCtrl")) := _ }
+      _.ctrlnode := LazyScope("l2_ctrl_xing", "TLL2CtrlCrossing") {
+        TLBuffer(1) := TLFragmenter(cbus, Some("LLCCtrl")) := cbus.crossOutHelper(ctrlXType)
+      }
     }
 
     pbus.coupleTo("mshr-regulation-regnode") {

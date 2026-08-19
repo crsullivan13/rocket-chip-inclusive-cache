@@ -184,6 +184,7 @@ class InclusiveCache(
       // Tie down default values in case there is no controller
       scheduler.io.req.valid := false.B
       scheduler.io.req.bits.address := 0.U
+      scheduler.io.req.bits.invalidate := false.B
       scheduler.io.resp.ready := true.B
 
       // Fix-up the missing addresses. We do this here so that the Scheduler can be
@@ -350,6 +351,7 @@ class InclusiveCache(
 
         sched.io.req.valid := contained && ctrl.module.io.flush_req.valid
         sched.io.req.bits.address := ctrl.module.io.flush_req.bits
+        sched.io.req.bits.invalidate := ctrl.module.io.invalidate_req
         when (contained && sched.io.req.ready) { ctrl.module.io.flush_req.ready := true.B }
 
         when (sched.io.resp.valid) { ctrl.module.io.flush_resp := true.B }
