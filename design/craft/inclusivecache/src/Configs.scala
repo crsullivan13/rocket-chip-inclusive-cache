@@ -102,30 +102,30 @@ class WithInclusiveCache(
     val cbus = context.tlBusWrapperLocationMap.lift(CBUS).getOrElse(sbus)
     val pbus = context.tlBusWrapperLocationMap(PBUS)
     val ibus = context.ibus
-    val InclusiveCacheParams(
-      ways,
-      sets,
-      hintsSkipProbe,
-      nRCID,
-      nMCID,
-      cbqriVer,
-      nbwblks,
-      rpfx,
-      pfx,
-      mrbwb,
-      nDramBanks,
-      dramBankOffset,
-      writeBytes,
-      portFactor,
-      memCycles,
-      physicalFilter,
-      bankedControl,
-      ctrlAddr,
-      ctrlXType,
-      bufInnerInterior,
-      bufInnerExterior,
-      bufOuterInterior,
-      bufOuterExterior) = p(InclusiveCacheKey)
+    val icParams = p(InclusiveCacheKey)
+    val ways = icParams.ways
+    val sets = icParams.sets
+    val hintsSkipProbe = icParams.hintsSkipProbe
+    val nRCID = icParams.nRCID
+    val nMCID = icParams.nMCID
+    val cbqriVer = icParams.cbqriVer
+    val nbwblks = icParams.nbwblks
+    val rpfx = icParams.rpfx
+    val pfx = icParams.pfx
+    val mrbwb = icParams.mrbwb
+    val nDramBanks = icParams.nDramBanks
+    val dramBankOffset = icParams.dramBankOffset
+    val writeBytes = icParams.writeBytes
+    val portFactor = icParams.portFactor
+    val memCycles = icParams.memCycles
+    val physicalFilter = icParams.physicalFilter
+    val bankedControl = icParams.bankedControl
+    val ctrlAddr = icParams.ctrlAddr
+    val ctrlXType = icParams.ctrlXType
+    val bufInnerInterior = icParams.bufInnerInterior
+    val bufInnerExterior = icParams.bufInnerExterior
+    val bufOuterInterior = icParams.bufOuterInterior
+    val bufOuterExterior = icParams.bufOuterExterior
 
     val l2Ctrl = ctrlAddr.map { addr =>
       InclusiveCacheControlParameters(
