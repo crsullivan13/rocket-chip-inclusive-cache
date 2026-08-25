@@ -45,8 +45,9 @@ class DirectoryRead(params: InclusiveCacheParameters) extends InclusiveCacheBund
 {
   val set = UInt(params.setBits.W)
   val tag = UInt(params.tagBits.W)
-  // 1 = way is eligible as a victim. Phase 2: always all-ones (structural no-op);
-  // a real mask that excludes ways owned by other live MSHRs arrives in Phase 4.
+  // 1 = way is eligible as a victim. Phase 4 (Scheduler.scala) drives a real mask that
+  // excludes ways already owned by other live MSHRs in the set being read; with
+  // lineGranularMSHR = false it degrades to all-ones (structurally identical to Phase 2).
   val wayMask = UInt(params.cache.ways.W)
 }
 
