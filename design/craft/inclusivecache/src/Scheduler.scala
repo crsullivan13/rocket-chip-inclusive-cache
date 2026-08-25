@@ -154,9 +154,19 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   val select_bc = mshr_selectOH(params.mshrs-2)
   nestedwb.set   := Mux(select_c, c_mshr.io.status.bits.set, bc_mshr.io.status.bits.set)
   nestedwb.tag   := Mux(select_c, c_mshr.io.status.bits.tag, bc_mshr.io.status.bits.tag)
-  nestedwb.b_toN       := select_bc && bc_mshr.io.schedule.bits.dir.valid && bc_mshr.io.schedule.bits.dir.bits.data.state === MetaData.INVALID
-  nestedwb.b_toB       := select_bc && bc_mshr.io.schedule.bits.dir.valid && bc_mshr.io.schedule.bits.dir.bits.data.state === MetaData.BRANCH
-  nestedwb.b_clr_dirty := select_bc && bc_mshr.io.schedule.bits.dir.valid
+  // Only a B-priority transaction may broadcast a b_* metadata side effect. require(lastLevel)
+  // makes outer probes impossible, so nestB never fires and bc_mshr is reachable only as
+  // ordinary overflow capacity for C-priority requests (prioFilter bit mshrs-2 is !prio(0),
+  // so mshr_insertOH may land there once every abc MSHR is busy). Broadcasting b_clr_dirty
+  // for such a Release would clear dirty in any MSHR matching (set, tag) -- today only
+  // bc_mshr itself, and only on the cycle it retires, so every consumer has already sampled
+  // the pre-update meta. Harmless, but only by that margin, and set-exclusivity is exactly
+  // what line-granular allocation removes. Gate the path off where it cannot legitimately fire.
+  //
+  val nestedwb_b = (!params.lastLevel).B && select_bc && bc_mshr.io.schedule.bits.dir.valid
+  nestedwb.b_toN       := nestedwb_b && bc_mshr.io.schedule.bits.dir.bits.data.state === MetaData.INVALID
+  nestedwb.b_toB       := nestedwb_b && bc_mshr.io.schedule.bits.dir.bits.data.state === MetaData.BRANCH
+  nestedwb.b_clr_dirty := nestedwb_b
   nestedwb.c_set_dirty := select_c  &&  c_mshr.io.schedule.bits.dir.valid && c_mshr.io.schedule.bits.dir.bits.data.dirty
 
   // Pick highest priority request
@@ -193,6 +203,20 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     params.ccover(request.valid && nestC,  "SCHEDULER_NESTC", "Priority escalation from channel C")
   }
   params.ccover(request.valid && queue, "SCHEDULER_SECONDARY", "Enqueue secondary miss")
+
+  // Phase 0 instrumentation (line-granular MSHR project): of the requests that setMatches
+  // serializes, how many conflict only on the set index and not on the line? That fraction is
+  // exactly what line-granular allocation recovers. Note this counts cycles, not requests --
+  // request.valid is held while request.ready is low -- so it reads as "cycles of false
+  // serialization", directly comparable to SCHEDULER_SECONDARY, which has the same shape.
+  val trueLineMatch = mshrs.map { m =>
+    m.io.status.valid &&
+    m.io.status.bits.set === request.bits.set &&
+    m.io.status.bits.tag === request.bits.tag
+  }.reduce(_||_)
+  params.ccover(request.valid && setMatches.orR && !trueLineMatch,
+                "SCHEDULER_FALSE_CONFLICT",
+                "Request serialized behind an MSHR holding a different line in the same set")
 
   // It might happen that lowerMatches has >1 bit if the two special MSHRs are in-use
   // We want to Q to the highest matching priority MSHR.
