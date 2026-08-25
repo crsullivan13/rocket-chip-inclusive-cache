@@ -49,6 +49,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     val c = Flipped(Decoupled(new TLBundleC(params.inner.bundle)))
     // Find 'way' via MSHR CAM lookup
     val set = UInt(params.setBits.W)
+    val tag = UInt(params.tagBits.W)
     val way = Flipped(UInt(params.wayBits.W))
     // ProbeAck write-back
     val bs_adr = Decoupled(new BankedStoreInnerAddress(params))
@@ -66,6 +67,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.resp.bits := DontCare
     io.c.ready := true.B
     io.set := 0.U
+    io.tag := 0.U
     io.bs_adr.valid := false.B
     io.bs_adr.bits := DontCare
     io.bs_dat := DontCare
@@ -93,6 +95,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     assert (!(c.valid && c.bits.corrupt), "Data poisoning unavailable")
 
     io.set := Mux(c.valid, set, RegEnable(set, c.valid)) // finds us the way
+    io.tag := Mux(c.valid, tag, RegEnable(tag, c.valid)) // tag-qualifies the way CAM
 
     // Cut path from inner C to the BankedStore SRAM setup
     //   ... this makes it easier to layout the L2 data banks far away
