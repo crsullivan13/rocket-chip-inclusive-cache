@@ -179,7 +179,9 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   //   acquire waiting for grant, inner release gets queued, outer probe -> inner probe -> deadlock
   // ... this is possible because the release+probe can be for same set, but different tag
 
-  // Line-granular MSHR status (Phase 1): unread until Phase 3/4 wire consumers.
+  // Line-granular MSHR status. probeTag is consumed by Phase 3's tag-qualified ProbeAck
+  // routing (Scheduler.scala); metaValid/victimTag/victimValid are consumed by Phase 4's
+  // ownsLine (Parameters.scala) and allocation gating (Scheduler.scala).
   io.status.bits.metaValid   := meta_valid
   io.status.bits.victimTag   := meta.tag
   io.status.bits.victimValid := meta_valid && !meta.hit && meta.state =/= INVALID && !w_releaseack

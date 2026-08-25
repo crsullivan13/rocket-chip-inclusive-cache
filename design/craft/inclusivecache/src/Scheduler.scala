@@ -76,7 +76,17 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // Deliver messages from Sinks to MSHRs
   mshrs.zipWithIndex.foreach { case (m, i) =>
-    m.io.sinkc.valid := m.io.status.valid && sinkC.io.resp.valid && sinkC.io.resp.bits.set === m.io.status.bits.set
+    // Phase 4: under line granularity more than one MSHR can share a set, so a ProbeAck must
+    // also be tag-qualified before it's allowed to update an MSHR's probe FSM (probes_done /
+    // w_[rp]probeack*) -- otherwise a same-set MSHR that is not the actual probe target could
+    // spuriously observe the ack (see docs/scheduler-mshr-analysis.md §7.3, "ProbeAck
+    // disambiguation": the old set-only gate was sound only because at most one MSHR could
+    // ever own a set at all). probeTag was added in Phase 1 and is already proven safe to
+    // compare even pre-metaValid -- see the Phase 3 comment on probeOH below, same argument
+    // applies here. Structurally a no-op when lineGranularMSHR is false: at most one MSHR can
+    // match on set alone in that configuration, and its probeTag is provably the ack's tag.
+    m.io.sinkc.valid := m.io.status.valid && sinkC.io.resp.valid && sinkC.io.resp.bits.set === m.io.status.bits.set &&
+                        (!params.micro.lineGranularMSHR.B || sinkC.io.resp.bits.tag === m.io.status.bits.probeTag)
     m.io.sinkd.valid := sinkD.io.resp.valid && sinkD.io.resp.bits.source === i.U
     m.io.sinke.valid := sinkE.io.resp.valid && sinkE.io.resp.bits.sink   === i.U
     m.io.sinkc.bits := sinkC.io.resp.bits
@@ -178,21 +188,62 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   sinkX.io.req.ready := directory.io.ready && request.ready && !sinkC.io.req.valid
   sinkA.io.req.ready := directory.io.ready && request.ready && !sinkC.io.req.valid && !sinkX.io.req.valid
 
-  // If no MSHR has been assigned to this set, we need to allocate one
-  val setMatches = Cat(mshrs.map { m => m.io.status.valid && m.io.status.bits.set === request.bits.set }.reverse)
-  val alloc = !setMatches.orR // NOTE: no matches also means no BC or C pre-emption on this set
-  // If a same-set MSHR says that requests of this type must be blocked (for bounded time), do it
-  val blockB = Mux1H(setMatches, mshrs.map(_.io.status.bits.blockB)) && request.bits.prio(1)
-  val blockC = Mux1H(setMatches, mshrs.map(_.io.status.bits.blockC)) && request.bits.prio(2)
-  // If a same-set MSHR says that requests of this type must be handled out-of-band, use special BC|C MSHR
+  // Phase 4 (line-granular MSHR allocation): sameSetOH is the raw, tag-oblivious CAM -- every
+  // live MSHR sharing this request's set, regardless of which line it owns. It is still
+  // needed below for way-exclusion (a genuinely per-*set* resource) and for the Phase 0
+  // false-conflict coverage point; it is exactly the old setMatches.
+  val sameSetOH = Cat(mshrs.map(m => m.io.status.valid && m.io.status.bits.set === request.bits.set).reverse)
+
+  // lineMatches is the ownership CAM that actually gates alloc/queue/block/nest: the set of
+  // MSHRs that own the requested *line* -- same tag, or the victim tag of an MSHR mid-eviction
+  // (docs/line-granular-mshr-plan.md §2, ownsLine). It replaces setMatches everywhere setMatches
+  // used to mean "the MSHR I must serialize behind", and degrades to sameSetOH when
+  // lineGranularMSHR is false, making this whole block a no-op transform of the original logic
+  // in that configuration.
+  val lineMatches = Cat(mshrs.map { m => m.io.status.valid && params.ownsLine(m.io.status.bits, request.bits.set, request.bits.tag) }.reverse)
+  val alloc = !lineMatches.orR // NOTE: no matches also means no BC or C pre-emption on this line
+  // If a same-line MSHR says that requests of this type must be blocked (for bounded time), do it
+  val blockB = Mux1H(lineMatches, mshrs.map(_.io.status.bits.blockB)) && request.bits.prio(1)
+  val blockC = Mux1H(lineMatches, mshrs.map(_.io.status.bits.blockC)) && request.bits.prio(2)
+  // If a same-line MSHR says that requests of this type must be handled out-of-band, use special BC|C MSHR
   // ... these special MSHRs interlock the MSHR that said it should be pre-empted.
-  val nestB  = Mux1H(setMatches, mshrs.map(_.io.status.bits.nestB))  && request.bits.prio(1)
-  val nestC  = Mux1H(setMatches, mshrs.map(_.io.status.bits.nestC))  && request.bits.prio(2)
+  val nestB  = Mux1H(lineMatches, mshrs.map(_.io.status.bits.nestB))  && request.bits.prio(1)
+  val nestC  = Mux1H(lineMatches, mshrs.map(_.io.status.bits.nestC))  && request.bits.prio(2)
   // Prevent priority inversion; we may not queue to MSHRs beyond our level
   val prioFilter = Cat(request.bits.prio(2), !request.bits.prio(0), ~0.U((params.mshrs-2).W))
-  val lowerMatches = setMatches & prioFilter
+  val lowerMatches = lineMatches & prioFilter
   // If we match an MSHR <= our priority that neither blocks nor nests us, queue to it.
   val queue = lowerMatches.orR && !nestB && !nestC && !blockB && !blockC
+
+  // Allocation gating (H1/H2/H6, plan §4.4): a fresh MSHR that will need a victim way must not
+  // race another same-set MSHR for that way, and must not be allocated at all while another
+  // same-set MSHR hasn't yet learned its own way (it could end up claiming any of them). This
+  // unknownWay term is also exactly what covers the §2 requirement that an MSHR still be
+  // treated as owning its whole set, for allocation purposes, before its directory result
+  // returns: ownsLine itself deliberately does NOT special-case !metaValid (see the comment on
+  // ownsLine in Parameters.scala) -- unknownWay is the mechanism that actually blocks forward
+  // progress during that window, not lineMatches.
+  val unknownWay = (sameSetOH & Cat(mshrs.map(!_.io.status.bits.metaValid).reverse)).orR
+  val busyWays = mshrs.zipWithIndex.map { case (m, i) =>
+    Mux(sameSetOH(i), UIntToOH(m.io.status.bits.way, params.cache.ways), 0.U) }.reduce(_|_)
+
+  // Only a real A-channel request can miss and therefore need a victim way. A Release always
+  // hits a resident line (MSHR.scala asserts new_meta.hit for prio(2)) and a flush that misses
+  // does nothing, so B/C are exempt -- channel C must never be blocked on a resource that only
+  // A-channel progress can free.
+  val needsVictim = request.bits.prio(0) && !request.bits.control.flush
+  val wayBlocked  = needsVictim && (unknownWay || busyWays.andR)
+
+  // MUST-RESOLVE (plan §4.4/§7.1 discussion, resolved): alloc and queue must remain mutually
+  // exclusive now that both are derived from lineMatches instead of the old setMatches. They
+  // are, by construction -- alloc requires lineMatches empty, queue requires lowerMatches (a
+  // subset of lineMatches) nonempty -- exactly mirroring the old setMatches-based exclusivity,
+  // just at line granularity. The case that used to make this trivial (a single shared CAM)
+  // is also the case most likely to silently break it if a future edit re-derives queue from
+  // sameSetOH by mistake (a same-set-different-line request would then be both freshly
+  // allocated AND pushed into another MSHR's secondary queue in the same cycle -- the same
+  // request processed twice). Tripwire it.
+  assert (!(request.valid && alloc && queue), "alloc and queue must be mutually exclusive")
 
   if (!params.lastLevel) {
     params.ccover(request.valid && blockB, "SCHEDULER_BLOCKB", "Interlock B request while resolving set conflict")
@@ -204,17 +255,20 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   }
   params.ccover(request.valid && queue, "SCHEDULER_SECONDARY", "Enqueue secondary miss")
 
-  // Phase 0 instrumentation (line-granular MSHR project): of the requests that setMatches
-  // serializes, how many conflict only on the set index and not on the line? That fraction is
-  // exactly what line-granular allocation recovers. Note this counts cycles, not requests --
-  // request.valid is held while request.ready is low -- so it reads as "cycles of false
-  // serialization", directly comparable to SCHEDULER_SECONDARY, which has the same shape.
+  // Phase 0 instrumentation (line-granular MSHR project): of the requests that sameSetOH
+  // (formerly setMatches) would have serialized under the old scheme, how many conflict only
+  // on the set index and not on the line? That fraction is exactly what line-granular
+  // allocation recovers, whether or not lineGranularMSHR is presently enabled -- this remains
+  // a fixed measurement of set-aliasing rate in the traffic, independent of what the scheduler
+  // now does as a result of it. Note this counts cycles, not requests -- request.valid is held
+  // while request.ready is low -- so it reads as "cycles of false serialization", directly
+  // comparable to SCHEDULER_SECONDARY, which has the same shape.
   val trueLineMatch = mshrs.map { m =>
     m.io.status.valid &&
     m.io.status.bits.set === request.bits.set &&
     m.io.status.bits.tag === request.bits.tag
   }.reduce(_||_)
-  params.ccover(request.valid && setMatches.orR && !trueLineMatch,
+  params.ccover(request.valid && sameSetOH.orR && !trueLineMatch,
                 "SCHEDULER_FALSE_CONFLICT",
                 "Request serialized behind an MSHR holding a different line in the same set")
 
@@ -279,7 +333,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   // Fanout the request to the appropriate handler (if any)
   val bypassQueue = schedule.reload && bypassMatches
   val request_alloc_cases =
-     (alloc && !mshr_uses_directory_assuming_no_bypass && mshr_free) ||
+     (alloc && !wayBlocked && !mshr_uses_directory_assuming_no_bypass && mshr_free) ||
      (nestB && !mshr_uses_directory_assuming_no_bypass && !bc_mshr.io.status.valid && !c_mshr.io.status.valid) ||
      (nestC && !mshr_uses_directory_assuming_no_bypass && !c_mshr.io.status.valid)
   request.ready := request_alloc_cases || (queue && (bypassQueue || requests.io.push.ready))
@@ -287,12 +341,35 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // When a request goes through, it will need to hit the Directory
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
-  directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
+  val dirReadSet = Mux(mshr_uses_directory_for_lb, scheduleSet, request.bits.set)
+  directory.io.read.bits.set := dirReadSet
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
-  // Phase 2: every way is eligible as a victim (structural no-op, bit-identical to the
-  // pre-wayMask behavior). A real mask that excludes ways owned by other live MSHRs is
-  // Phase 4's job.
-  directory.io.read.bits.wayMask := ~0.U(params.cache.ways.W)
+
+  // Phase 4: drive the real way mask (§4.4). dirSameSetOH mirrors sameSetOH but against
+  // whichever set is actually being read this cycle -- a fresh allocation reads
+  // request.bits.set, an MSHR reloading a mismatched secondary miss reads scheduleSet -- minus
+  // the reloading MSHR's own entry: it is releasing that way as it retires, so it may reuse it,
+  // and the reload case is therefore guaranteed at least one free way.
+  //
+  // Unlike the allocation-side wayBlocked gate, this does not special-case unknownWay. A
+  // reloading MSHR's directory read (mshr_uses_directory_for_lb) is not itself gated the way a
+  // fresh alloc is -- it must proceed on the cycle the MSHR retires, all-or-nothing scheduling
+  // (§5.1 of the analysis doc) leaves no room to stall it -- so if another same-set MSHR is
+  // concurrently mid-resolution (!metaValid) at that moment, its `way` field here is stale
+  // (last transaction's way, or undefined if never used) rather than a true reservation. Ruling
+  // this race out by static reasoning alone was not possible in the time available: it
+  // requires a fresh MSHR (allocated when the set had no unresolved neighbor, satisfying its
+  // own wayBlocked check) whose directory result is still in flight while an unrelated,
+  // already-resolved same-set MSHR independently reaches lb_tag_mismatch reload -- both are
+  // individually reachable and nothing in the current design prevents them overlapping. Left
+  // as-is per the plan's given formula; the physical-slot-uniqueness assertion below is the
+  // backstop that will catch it in sim if it is ever actually hit, rather than corrupting data
+  // silently.
+  val dirSameSetOH = Cat(mshrs.map(m => m.io.status.valid && m.io.status.bits.set === dirReadSet).reverse) &
+                     ~Mux(mshr_uses_directory_for_lb, mshr_selectOH, 0.U)
+  val dirBusyWays = mshrs.zipWithIndex.map { case (m, i) =>
+    Mux(dirSameSetOH(i), UIntToOH(m.io.status.bits.way, params.cache.ways), 0.U) }.reduce(_|_)
+  directory.io.read.bits.wayMask := ~dirBusyWays
 
   // Enqueue the request if not bypassed directly into an MSHR
   requests.io.push.valid := request.valid && queue && !bypassQueue
@@ -305,7 +382,11 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   val mshr_insertOH = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>
-    when (request.valid && alloc && s && !mshr_uses_directory_assuming_no_bypass) {
+    // wayBlocked must gate the actual allocation here, not just request_alloc_cases /
+    // request.ready above -- mshr_insertOH's zero-ness already accounts for mshr_free, but has
+    // no notion of way availability, so without this term an MSHR would be allocated on a
+    // cycle request.ready was actually held low for wayBlocked.
+    when (request.valid && alloc && !wayBlocked && s && !mshr_uses_directory_assuming_no_bypass) {
       m.io.allocate.valid := true.B
       m.io.allocate.bits.viewAsSupertype(chiselTypeOf(request.bits)) := request.bits
       m.io.allocate.bits.repeat := false.B
@@ -354,6 +435,28 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   // evaluated at the same cycle 'way' was actually latched, not one cycle later against
   // MSHR state (e.g. probeTag) that may have since legitimately advanced.
   assert (!sinkC.io.camValid || PopCount(probeOH) === 1.U)
+
+  // §7.1 invariants (plan doc): no two MSHRs may ever own the same line, and no two MSHRs may
+  // ever own the same physical (set, way) slot. Both are checked against every valid MSHR's
+  // own (set, tag) / (set, way) as the reference point, so they exhaustively cover all pairs,
+  // not just the incoming request's line. Both hold unconditionally, including with
+  // lineGranularMSHR false -- where the first degrades to restating the old one-MSHR-per-set
+  // invariant and the second is unaffected by the flag at all -- so they regress Phases 0-3 as
+  // well as guard Phase 4.
+  mshrs.foreach { m =>
+    when (m.io.status.valid) {
+      assert (PopCount(mshrs.map(o => o.io.status.valid &&
+                                      params.ownsLine(o.io.status.bits, m.io.status.bits.set, m.io.status.bits.tag))) <= 1.U,
+        "two MSHRs own the same line")
+    }
+    when (m.io.status.valid && m.io.status.bits.metaValid) {
+      assert (PopCount(mshrs.map(o => o.io.status.valid && o.io.status.bits.metaValid &&
+                                      o.io.status.bits.set === m.io.status.bits.set &&
+                                      o.io.status.bits.way === m.io.status.bits.way)) <= 1.U,
+        "two MSHRs own the same physical (set, way) slot")
+    }
+  }
+
   sinkD.io.way := VecInit(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := VecInit(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 

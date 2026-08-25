@@ -362,8 +362,10 @@ class SourceD(params: InclusiveCacheParameters) extends Module
   ////////////////////////////////////// HAZARDS //////////////////////////////////////
 
   // SinkC, SourceC, and SinkD can never interfer with each other because their operation
-  // is fully contained with an execution plan of an MSHR. That MSHR owns the entire set, so
-  // there is no way for a data race.
+  // is fully contained with an execution plan of an MSHR. What actually matters is that no
+  // two MSHRs ever hold the same physical (set, way) slot at once (line-granular MSHR
+  // allocation's way-exclusion mechanism, Scheduler.scala, preserves this); the evict_safe/
+  // grant_safe checks below compare exactly that, not "the entire set".
 
   // However, SourceD is special. We allow it to run ahead after the MSHR and scheduler have
   // released control of a set+way. This is necessary to allow single cycle occupancy for
