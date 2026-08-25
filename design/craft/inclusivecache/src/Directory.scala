@@ -24,7 +24,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import MetaData._
 import chisel3.experimental.dataview._
-import freechips.rocketchip.util.DescribedSRAM
+import freechips.rocketchip.util.{DescribedSRAM, leftOR}
 
 class DirectoryEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -45,6 +45,9 @@ class DirectoryRead(params: InclusiveCacheParameters) extends InclusiveCacheBund
 {
   val set = UInt(params.setBits.W)
   val tag = UInt(params.tagBits.W)
+  // 1 = way is eligible as a victim. Phase 2: always all-ones (structural no-op);
+  // a real mask that excludes ways owned by other live MSHRs arrives in Phase 4.
+  val wayMask = UInt(params.cache.ways.W)
 }
 
 class DirectoryResult(params: InclusiveCacheParameters) extends DirectoryEntry(params)
@@ -110,17 +113,31 @@ class Directory(params: InclusiveCacheParameters) extends Module
   val regout = params.dirReg(cc_dir.read(io.read.bits.set, ren), ren1)
   val tag = params.dirReg(RegEnable(io.read.bits.tag, ren), ren1)
   val set = params.dirReg(RegEnable(io.read.bits.set, ren), ren1)
+  // Sampled at read issue, not at result time: a way freed between issue and result
+  // was freed by a write our `regout` may not yet reflect, so selecting it here would
+  // evict stale contents.
+  val wayMask = params.dirReg(RegEnable(io.read.bits.wayMask, ren), ren1)
 
   // Compute the victim way in case of an evicition
   val victimLFSR = random.LFSR(width = 16, params.dirReg(ren))(InclusiveCacheParameters.lfsrBits-1, 0)
   val victimSums = Seq.tabulate(params.cache.ways) { i => ((1 << InclusiveCacheParameters.lfsrBits)*i / params.cache.ways).U }
   val victimLTE  = Cat(victimSums.map { _ <= victimLFSR }.reverse)
   val victimSimp = Cat(0.U(1.W), victimLTE(params.cache.ways-1, 1), 1.U(1.W))
-  val victimWayOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1)
-  val victimWay = OHToUInt(victimWayOH)
+  val victimStartOH = victimSimp(params.cache.ways-1,0) & ~(victimSimp >> 1) // uniformly-distributed starting point, as today
   assert (!ren2 || victimLTE(0) === 1.U)
   assert (!ren2 || ((victimSimp >> 1) & ~victimSimp) === 0.U) // monotone
-  assert (!ren2 || PopCount(victimWayOH) === 1.U)
+  assert (!ren2 || PopCount(victimStartOH) === 1.U)
+
+  // Take the first wayMask-eligible way at or after victimStartOH, circularly (the same
+  // doubled-vector round-robin idiom used elsewhere, e.g. Scheduler.scala's mshr_selectOH2).
+  // leftOR fills 1s from low bits to high bits, so leftOR(victimStartOH) marks every bit
+  // at or above the LFSR-selected start.
+  // With wayMask := ~0.U (Phase 2), the first eligible way at or after start is start
+  // itself, so victimWayOH === victimStartOH and this is bit-identical to today.
+  val cand    = Cat(wayMask, wayMask & leftOR(victimStartOH))
+  val candOH2 = ~(leftOR(cand) << 1) & cand
+  val victimWayOH = candOH2(2*params.cache.ways-1, params.cache.ways) | candOH2(params.cache.ways-1, 0)
+  val victimWay   = OHToUInt(victimWayOH)
 
   val setQuash = bypass_valid && bypass.set === set
   val tagMatch = bypass.data.tag === tag
@@ -131,6 +148,9 @@ class Directory(params: InclusiveCacheParameters) extends Module
     w.tag === tag && w.state =/= INVALID && (!setQuash || i.U =/= bypass.way)
   }.reverse)
   val hit = hits.orR
+  // A directory miss must always have somewhere to evict. Moved here (rather than beside
+  // victimWayOH above) because it needs `hit`, computed below victim selection.
+  assert (!ren2 || hit || wayMask.orR, "Directory miss with no available victim way")
 
   io.result.valid := ren2
   io.result.bits.viewAsSupertype(chiselTypeOf(bypass.data)) := Mux(hit, Mux1H(hits, ways), Mux(setQuash && (tagMatch || wayMatch), bypass.data, Mux1H(victimWayOH, ways)))

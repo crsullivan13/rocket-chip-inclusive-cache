@@ -289,6 +289,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory
   directory.io.read.bits.set := Mux(mshr_uses_directory_for_lb, scheduleSet,          request.bits.set)
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
+  // Phase 2: every way is eligible as a victim (structural no-op, bit-identical to the
+  // pre-wayMask behavior). A real mask that excludes ways owned by other live MSHRs is
+  // Phase 4's job.
+  directory.io.read.bits.wayMask := ~0.U(params.cache.ways.W)
 
   // Enqueue the request if not bypassed directly into an MSHR
   requests.io.push.valid := request.valid && queue && !bypassQueue
