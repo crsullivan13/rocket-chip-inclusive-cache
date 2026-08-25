@@ -76,7 +76,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
 
   // Deliver messages from Sinks to MSHRs
   mshrs.zipWithIndex.foreach { case (m, i) =>
-    m.io.sinkc.valid := sinkC.io.resp.valid && sinkC.io.resp.bits.set === m.io.status.bits.set
+    m.io.sinkc.valid := m.io.status.valid && sinkC.io.resp.valid && sinkC.io.resp.bits.set === m.io.status.bits.set
     m.io.sinkd.valid := sinkD.io.resp.valid && sinkD.io.resp.bits.source === i.U
     m.io.sinke.valid := sinkE.io.resp.valid && sinkE.io.resp.bits.sink   === i.U
     m.io.sinkc.bits := sinkC.io.resp.bits
@@ -338,12 +338,19 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
     m.io.directory.bits := directory.io.result.bits
   }
 
-  // MSHR response meta-data fetch
-  sinkC.io.way :=
-    Mux(bc_mshr.io.status.valid && bc_mshr.io.status.bits.set === sinkC.io.set,
-      bc_mshr.io.status.bits.way,
-      Mux1H(abc_mshrs.map(m => m.io.status.valid && m.io.status.bits.set === sinkC.io.set),
-            abc_mshrs.map(_.io.status.bits.way)))
+  // MSHR response meta-data fetch (Phase 3: tag-qualified so the way CAM is unique per line,
+  // not merely per set). probeTag is safe to compare here even for an MSHR whose directory
+  // read has not yet returned (metaValid == false): probeTag = Mux(!w_rprobeacklast, meta.tag,
+  // request.tag), and w_rprobeacklast can only be driven false in the same cycle meta_valid is
+  // driven true (MSHR.scala's "Create execution plan" block), so !meta_valid implies
+  // w_rprobeacklast === true, which forces probeTag to read the legitimately-loaded
+  // request.tag rather than the stale meta.tag register. So no live ProbeAck can ever be
+  // compared against a garbage probeTag.
+  val probeOH = mshrs.map(m => m.io.status.valid &&
+                              sinkC.io.set === m.io.status.bits.set &&
+                              sinkC.io.tag === m.io.status.bits.probeTag)
+  sinkC.io.way := Mux1H(probeOH, mshrs.map(_.io.status.bits.way))
+  assert (!sinkC.io.bs_adr.valid || PopCount(probeOH) === 1.U)
   sinkD.io.way := VecInit(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := VecInit(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 
