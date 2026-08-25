@@ -52,6 +52,10 @@ class MSHRStatus(params: InclusiveCacheParameters) extends InclusiveCacheBundle(
   val nestC  = Bool()
   val rcid = UInt(6.W)
   val mcid = UInt(6.W)
+  val metaValid   = Bool()
+  val victimTag   = UInt(params.tagBits.W)
+  val victimValid = Bool()
+  val probeTag    = UInt(params.tagBits.W)
 }
 
 class NestedWriteback(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -183,9 +187,11 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   //   acquire waiting for grant, inner release gets queued, outer probe -> inner probe -> deadlock
   // ... this is possible because the release+probe can be for same set, but different tag
 
-  // when ( io.status.valid && io.status.bits.nestC ) {
-  //   SynthesizePrintf(printf("NestC: w_rprobeackfirst %d, w_pprobeackfirst %d, w_grantfirst %d\n", !w_rprobeackfirst, !w_pprobeackfirst, !w_grantfirst))
-  // }
+  // Line-granular MSHR status (Phase 1): unread until Phase 3/4 wire consumers.
+  io.status.bits.metaValid   := meta_valid
+  io.status.bits.victimTag   := meta.tag
+  io.status.bits.victimValid := meta_valid && !meta.hit && meta.state =/= INVALID && !w_releaseack
+  io.status.bits.probeTag    := Mux(!w_rprobeacklast, meta.tag, request.tag)
 
   // We can only demand: block, nest, or queue
   assert (!io.status.bits.nestB || !io.status.bits.blockB)
