@@ -51,6 +51,11 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     // ProbeAck write-back
     val bs_adr = Decoupled(new BankedStoreInnerAddress(params))
     val bs_dat = new BankedStoreInnerPoison(params)
+    // Undelayed (pre-Queue) version of bs_adr.valid, for use by way-CAM uniqueness
+    // checks that must line up with the same cycle 'way' (Mux1H(probeOH, ...)) was
+    // latched into the queue, rather than one cycle later against the Queue's
+    // registered output.
+    val camValid = Output(Bool())
     // SourceD sideband
     val rel_pop  = Flipped(Decoupled(new PutBufferPop(params)))
     val rel_beat = new PutBufferCEntry(params)
@@ -68,6 +73,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.bs_adr.valid := false.B
     io.bs_adr.bits := DontCare
     io.bs_dat := DontCare
+    io.camValid := false.B
     io.rel_pop.ready := true.B
     io.rel_beat := DontCare
   } else {
@@ -100,6 +106,7 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.bs_adr <> Queue(bs_adr, 1, pipe=true)
     io.bs_dat.data   := RegEnable(c.bits.data,    bs_adr.fire)
     bs_adr.valid     := resp && (!first || (c.valid && hasData))
+    io.camValid      := bs_adr.valid
     bs_adr.bits.noop := !c.valid
     bs_adr.bits.way  := io.way
     bs_adr.bits.set  := io.set

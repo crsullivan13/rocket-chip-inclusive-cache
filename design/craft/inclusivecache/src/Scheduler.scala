@@ -350,7 +350,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters) extends Modu
                               sinkC.io.set === m.io.status.bits.set &&
                               sinkC.io.tag === m.io.status.bits.probeTag)
   sinkC.io.way := Mux1H(probeOH, mshrs.map(_.io.status.bits.way))
-  assert (!sinkC.io.bs_adr.valid || PopCount(probeOH) === 1.U)
+  // Use the undelayed camValid (not the Queue-registered bs_adr.valid) so this check is
+  // evaluated at the same cycle 'way' was actually latched, not one cycle later against
+  // MSHR state (e.g. probeTag) that may have since legitimately advanced.
+  assert (!sinkC.io.camValid || PopCount(probeOH) === 1.U)
   sinkD.io.way := VecInit(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := VecInit(mshrs.map(_.io.status.bits.set))(sinkD.io.source)
 
