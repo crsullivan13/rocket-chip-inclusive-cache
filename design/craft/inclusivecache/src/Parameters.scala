@@ -121,13 +121,7 @@ case class InclusiveCacheMicroParameters(
   dirReg:     Boolean = false,
   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.fullC, // or none
   outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full,  // or flowAE
-  // Line-granular MSHR allocation (docs/line-granular-mshr-plan.md). false = today's
-  // set-granular behavior: at most one non-preempting MSHR per cache set. true = at most one
-  // MSHR per cache *line*, so multiple MSHRs may concurrently service distinct lines that
-  // alias into the same set. Every predicate gated on this flag degrades to the old
-  // expression when it is false, so it is a safety fallback while the new path is trusted --
-  // delete the parameter once it is.
-  lineGranularMSHR: Boolean = false)
+  )
 {
   require (writeBytes > 0 && isPow2(writeBytes))
   require (memCycles > 0)
@@ -262,24 +256,9 @@ case class InclusiveCacheParameters(
   def ccover(cond: Bool, label: String, desc: String)(implicit sourceInfo: SourceInfo) =
     cover(cond, "CCACHE_L" + cache.level + "_" + label, "MemorySystem;;" + desc)
 
-  // Line-granular MSHR ownership predicate (docs/line-granular-mshr-plan.md §2). An MSHR
-  // servicing a miss-with-eviction owns two lines at once: the one it is filling (s.tag) and,
-  // until its writeback is acknowledged, the one it is evicting (s.victimTag, valid only while
-  // s.victimValid). Degrades to the old set-only predicate when lineGranularMSHR is false, so
-  // every caller is behavior-preserving in that configuration by construction.
-  //
-  // Deliberately does NOT special-case the pre-directory-return window (!s.metaValid): during
-  // that window s.victimValid is always false (MSHR.scala drives it as
-  // `meta_valid && !meta.hit && ...`, which is trivially false whenever !meta_valid), so this
-  // predicate alone only matches a request whose tag equals the just-allocated request's own
-  // tag -- it does NOT treat the MSHR as owning arbitrary other lines in its set during that
-  // window. That's intentional: the "still owns the whole set until the way is known" half of
-  // §2's requirement is covered separately, by the allocation-side `unknownWay` term in
-  // Scheduler.scala (§4.4), not by this function.
   def ownsLine(s: MSHRStatus, set: UInt, tag: UInt): Bool = {
     val setEq = s.set === set
-    if (!micro.lineGranularMSHR) setEq
-    else setEq && ((s.tag === tag) || (s.victimValid && s.victimTag === tag))
+    setEq && ((s.tag === tag) || (s.victimValid && s.victimTag === tag))
   }
 }
 

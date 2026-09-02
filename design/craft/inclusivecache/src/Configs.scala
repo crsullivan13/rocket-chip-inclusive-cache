@@ -108,15 +108,7 @@ class WithInclusiveCache(
         portFactor = portFactor,
         memCycles = memCycles,
         innerBuf = bufInnerInterior,
-        outerBuf = bufOuterInterior,
-        // Line-granular MSHR allocation (docs/line-granular-mshr-plan.md), Phase 4. This is
-        // the sole InclusiveCacheMicroParameters construction site in this checkout, so this
-        // is the one place that actually turns the feature on for every config built from
-        // WithInclusiveCache (including dual_boom_4GB_uni_bank / DualMedBoomConfig /
-        // FRFCFS4GBUniRank_BaseXilinxVCU118Config). Default stays false in the case class
-        // itself; flip it back to false (or remove this line) to fall back to the verified
-        // set-granular path.
-        lineGranularMSHR = true),
+        outerBuf = bufOuterInterior),
       l2Ctrl))
 
     def skipMMIO(x: TLClientParameters) = {

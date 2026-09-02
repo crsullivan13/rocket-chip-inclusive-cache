@@ -362,16 +362,9 @@ class SourceD(params: InclusiveCacheParameters) extends Module
   ////////////////////////////////////// HAZARDS //////////////////////////////////////
 
   // SinkC, SourceC, and SinkD can never interfer with each other because their operation
-  // is fully contained with an execution plan of an MSHR. What actually matters is that no
-  // two MSHRs ever hold the same physical (set, way) slot at once (line-granular MSHR
-  // allocation's way-exclusion mechanism, Scheduler.scala, preserves this); the evict_safe/
-  // grant_safe checks below compare exactly that, not "the entire set".
-
-  // However, SourceD is special. We allow it to run ahead after the MSHR and scheduler have
-  // released control of a set+way. This is necessary to allow single cycle occupancy for
-  // hits. Thus, we need to be careful about data hazards between SourceD and the other ports
-  // of the BankedStore. We can at least compare to registers 's1_req_reg', because the first
-  // cycle of SourceD falls within the occupancy of the MSHR's plan.
+  // is fully contained with an execution plan of an MSHR. What actually matters for the
+  // checks below is the physical (set, way) slot, not "the entire set" -- and that is exactly
+  // what evict_safe/grant_safe compare.
 
   // Must ReleaseData=> be interlocked? RaW hazard
   io.evict_safe :=
