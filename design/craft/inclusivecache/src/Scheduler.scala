@@ -128,28 +128,21 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
     params.ccover(mshr_stall_bc && bc_mshr.io.status.valid, "SCHEDULER_BC_INTERLOCK", "BC MSHR interlocked due to pre-emption")
 
   // Consider scheduling an MSHR only if all the resources it requires are available
-  val mshr_request = Cat((mshrs zip mshr_stall).map { case (m, s) => {
-      val base = m.io.schedule.valid && !s &&
-        (sourceA.io.rcidReadys(m.io.schedule.bits.a.bits.rcid) || !m.io.schedule.bits.a.valid) &&
-        (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
-        (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
-        (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
-        (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
-        (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
-        (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
-        
-      // val noThrottle = if ( m != bc_mshr && m != c_mshr ) { 
-      //     !(m.io.schedule.bits.a.valid && io.throttle(m.io.schedule.bits.a.bits.rcid)) && 
-      //     !(m.io.schedule.bits.c.valid && io.throttle(m.io.schedule.bits.c.bits.rcid) && m.io.schedule.bits.c.bits.opcode === TLMessages.ReleaseData)
-      //   } else { 
-      //     true.B 
-      //   } params.expandAddress(m.io.schedule.bits.a.tag, m.io.schedule.bits.a.set, 0.U)
+  val mshr_request = Cat(((mshrs zip mshr_stall) zip mshrSetUnresolved).map { case ((m, s), u) =>
+    val base = m.io.schedule.valid && !s && !(m.io.schedule.bits.reload && u) &&
+      (sourceA.io.rcidReadys(m.io.schedule.bits.a.bits.rcid) || !m.io.schedule.bits.a.valid) &&
+      (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
+      (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
+      (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
+      (sourceE.io.req.ready || !m.io.schedule.bits.e.valid) &&
+      (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
+      (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
+
       val mshrDramBankTarget = ( params.expandAddress(m.io.schedule.bits.a.bits.tag, m.io.schedule.bits.a.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
       val shouldThrottle = io.throttle(m.io.schedule.bits.a.bits.rcid).dramBank(mshrDramBankTarget)
       val noThrottle = !(m.io.schedule.bits.a.valid && shouldThrottle)
 
       base && noThrottle
-    }
   }.reverse)
 
   // Round-robin arbitration of MSHRs
