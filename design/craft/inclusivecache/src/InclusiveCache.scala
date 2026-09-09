@@ -26,6 +26,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.subsystem.{SubsystemBankedCoherenceKey}
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.util._
 
 class InclusiveCache(
   val cache: CacheParameters,
@@ -122,8 +123,11 @@ class InclusiveCache(
       println("")
     }
 
+    val reads = Seq.fill(node.in.size)(WireDefault(false.B))
+    val writes_put = Seq.fill(node.in.size)(WireDefault(false.B))
+    val writes_rel = Seq.fill(node.in.size)(WireDefault(false.B))
     // Create the L2 Banks
-    val mods = (node.in zip node.out) map { case ((in, edgeIn), (out, edgeOut)) =>
+    val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
       edgeOut.manager.managers.foreach { m =>
         require (m.supportsAcquireB.contains(xfer),
           s"All managers behind the L2 must support acquireB($xfer) " +
@@ -154,7 +158,27 @@ class InclusiveCache(
       in .b.bits.address := params.restoreAddress(scheduler.io.in .b.bits.address)
       out.c.bits.address := params.restoreAddress(scheduler.io.out.c.bits.address)
 
+      when (in.a.fire && in.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.Get)) {
+        reads(i) := true.B
+      }
+
+      when (in.a.fire && in.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData) && edgeIn.first(in.a)) {
+        writes_put(i) := true.B
+      }
+
+      when (in.c.fire && edgeIn.first(in.c) && in.c.bits.opcode.isOneOf(TLMessages.ReleaseData, TLMessages.ProbeAckData)) {
+        writes_rel(i) := true.B
+      } 
+
       scheduler
+    }
+
+    // These count the "obvious" transactions that move data
+    // Don't count AcquirePerm, don't count atomics, don't count Hint
+    Seq(("read", reads), ("put", writes_put), ("wb", writes_rel)).foreach { case (name, sigs) =>
+      sigs.zipWithIndex.foreach { case (sig, i) =>
+        midas.targetutils.PerfCounter(sig, s"llc_${name}_b$i", s"Bank $i LLC $name events")
+      }
     }
 
     ctrls.foreach { ctrl =>
