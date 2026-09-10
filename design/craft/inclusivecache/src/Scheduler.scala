@@ -50,7 +50,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
   io.out.a <> sourceA.io.a
   sourceA.io.throttle := io.throttle
-  //io.outerAcquireInfo := sourceA.io.outerAcquireInfo
   io.out.c <> sourceC.io.c
   //sourceC.io.throttle := io.throttle
   io.out.e <> sourceE.io.e
@@ -93,8 +92,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
     m.io.nestedwb := nestedwb
   }
 
-  //mshrs.foreach { case m => m.io.throttle := io.throttle }
-
   // If the pre-emption BC or C MSHR have a matching set, the normal MSHR must be blocked
   val mshr_stall_abc = abc_mshrs.map { m =>
     (bc_mshr.io.status.valid && m.io.status.bits.set === bc_mshr.io.status.bits.set) ||
@@ -115,13 +112,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   }
 
   val stall_abc = (mshr_stall_abc zip abc_mshrs) map { case (s, m) => s && m.io.status.valid }
-  (stall_abc zip abc_mshrs).foreach { case (stall, abc_mshr) =>
-    when ( stall ) {
-      SynthesizePrintf(printf("ABC MSHR pre-empted, req from domain %d\n", abc_mshr.io.status.bits.rcid))
-      SynthesizePrintf(printf("BC MSHR req from domain %d, valid %d\n", bc_mshr.io.status.bits.rcid, bc_mshr.io.status.valid))
-      SynthesizePrintf(printf("C MSHR req from domain %d, valid %d\n", c_mshr.io.status.bits.rcid, c_mshr.io.status.valid))
-    }
-  }
+
   if (!params.lastLevel || !params.firstLevel)
     params.ccover(stall_abc.reduce(_||_), "SCHEDULER_ABC_INTERLOCK", "ABC MSHR interlocked due to pre-emption")
   if (!params.lastLevel)
@@ -237,14 +228,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   if (!params.firstLevel) {
     params.ccover(request.valid && blockC, "SCHEDULER_BLOCKC", "Interlock C request while resolving set conflict")
     params.ccover(request.valid && nestC,  "SCHEDULER_NESTC", "Priority escalation from channel C")
-
-    when ( request.valid && blockC ) {
-      SynthesizePrintf(printf("Block C while resolving set conflict, domain %d, blocker %d\n",request.bits.rcid, Mux1H(sameSetOH, mshrs.map(_.io.status.bits.rcid))))
-    }
-
-    when ( request.valid && nestC ) {
-      SynthesizePrintf(printf("Priority escalation from channel C, domain %d, nester %d\n",request.bits.rcid, Mux1H(sameSetOH, mshrs.map(_.io.status.bits.rcid))))
-    }
   }
   params.ccover(request.valid && queue, "SCHEDULER_SECONDARY", "Enqueue secondary miss")
 
@@ -326,11 +309,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
      (nestC && !mshr_uses_directory_assuming_no_bypass && !c_mshr.io.status.valid)
   request.ready := request_alloc_cases || (queue && (bypassQueue || requests.io.push.ready))
   val alloc_uses_directory = request.valid && request_alloc_cases
-
-  when ( request.valid && !request.ready ) {
-    SynthesizePrintf(printf("Request not ready, alloc_cases %d, queue %d, bypassQueue %d, reqeusts push ready %d, domain %d\n",
-                              request_alloc_cases, queue, bypassQueue, requests.io.push.ready, request.bits.rcid))
-  }
 
   // When a request goes through, it will need to hit the Directory
   directory.io.read.valid := mshr_uses_directory || alloc_uses_directory

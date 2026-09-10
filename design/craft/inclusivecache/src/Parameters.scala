@@ -34,7 +34,6 @@ case class CacheParameters(
   blockBytes:  Int,
   beatBytes:   Int, // inner
   hintsSkipProbe: Boolean,
-  outerMSHRs: Int,
   nRCID: Int,
   nMCID: Int,
   cbqriVer: Int,
@@ -50,6 +49,8 @@ case class CacheParameters(
   require (blockBytes > 0 && isPow2(blockBytes))
   require (beatBytes > 0 && isPow2(beatBytes))
   require (blockBytes >= beatBytes)
+  require (nRCID > 0 && nRCID <= 16) // TL rcid is 4 bits
+  require (nMCID > 0 && nMCID <= 16) // TL mcid is 4 bits
 
   val blocks = ways * sets
   val sizeBytes = blocks * blockBytes
@@ -129,12 +130,14 @@ case class InclusiveCacheMicroParameters(
   memCycles:  Int = 40, // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
   portFactor: Int = 4,  // numSubBanks = (widest TL port * portFactor) / writeBytes
   dirReg:     Boolean = false,
+  outerMSHRs: Int = 6, // # of MSHRs that can issue outer Acquires (excludes the B and C MSHRs)
   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.fullC, // or none
   outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full,  // or flowAE
   )
 {
   require (writeBytes > 0 && isPow2(writeBytes))
   require (memCycles > 0)
+  require (outerMSHRs >= (if (dirReg) 3 else 2)) // cover the Directory latency
   require (portFactor >= 2) // for inner RMW and concurrent outer Relase + Grant
 }
 
@@ -308,15 +311,10 @@ object InclusiveCacheParameters
   val lfsrBits = 10
   val L2ControlAddress = BigInt(0x2010000L)
   val L2ControlSize = 0x1000
-  def out_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int = {
-    // We need 2-3 normal MSHRs to cover the Directory latency
-    // To fully exploit memory bandwidth-delay-product, we need memCyles/blockBeats MSHRs
-    //max(if (micro.dirReg) 3 else 2, (micro.memCycles + cache.blockBeats - 1) / cache.blockBeats)
-    cache.outerMSHRs
-  }
+  def out_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int = micro.outerMSHRs
   def all_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int =
     // We need a dedicated MSHR for B+C each
-    2 + out_mshrs(cache, micro) //+ 4
+    2 + out_mshrs(cache, micro)
 }
 
 class InclusiveCacheBundle(params: InclusiveCacheParameters) extends Bundle

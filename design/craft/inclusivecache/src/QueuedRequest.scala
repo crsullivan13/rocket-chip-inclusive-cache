@@ -18,6 +18,7 @@
 package sifive.blocks.inclusivecache
 
 import chisel3._
+import chisel3.util._
 
 class QueuedRequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -33,8 +34,8 @@ class QueuedRequest(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val tag    = UInt(params.tagBits.W)
   val offset = UInt(params.offsetBits.W)
   val put    = UInt(params.putBits.W)
-  val rcid = UInt(6.W)
-  val mcid = UInt(6.W)
+  val rcid   = UInt(log2Up(params.cache.nRCID).W)
+  val mcid   = UInt(log2Up(params.cache.nMCID).W)
 }
 
 class FullRequest(params: InclusiveCacheParameters) extends QueuedRequest(params)

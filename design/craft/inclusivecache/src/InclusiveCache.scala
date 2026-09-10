@@ -156,6 +156,7 @@ class InclusiveCache(
     val nMCID = cache.nMCID
     val mrbwb = cache.mrbwb
     val nDramBanks = cache.nDramBanks
+    val dramBankBits = log2Ceil(nDramBanks)
     val dramBankOffset = cache.dramBankOffset
 
     // Create the L2 Banks
@@ -196,11 +197,11 @@ class InclusiveCache(
       scheduler
     }
 
-    val bankReadCntrs = Seq.fill(nRCID)(Reg(Vec(nDramBanks, UInt(64.W))))
-    val maxReads = Reg(Vec(nRCID,UInt(64.W)))
-    val throttleRegs = Reg(Vec(nRCID, Vec(nDramBanks, Bool())))
+    val cntrBits = 17
+    val bankReadCntrs = Seq.fill(nRCID)(Reg(Vec(nDramBanks, UInt(cntrBits.W))))
+    val maxReads = Reg(Vec(nRCID, UInt(16.W)))
 
-    val periodCount = RegInit(0.U(64.W))
+    val periodCount = RegInit(0.U(25.W))
     val periodReset = Wire(Bool())
 
     val mcidCounters = RegInit(VecInit(Seq.fill(nMCID)(0.U(62.W))))
@@ -288,25 +289,17 @@ class InclusiveCache(
     periodReset := periodCount >= mmio.module.io.periodLen
     periodCount := Mux(periodReset || !mmio.module.io.enGlobal, 0.U, periodCount + 1.U)
 
-    val activeAcquires = mods.zip(node.edges.in).map{ case (sched, edgeIn) =>
-      val didBankFireAcquire = sched.io.out.a.fire
-      val firedRCID = WireDefault(nRCID.U)
-      val firedMCID = WireDefault(nMCID.U)
-      val dramBankTarget = WireDefault(nDramBanks.U)
-
-      when (didBankFireAcquire) {
-        firedRCID := sched.io.out.a.bits.rcid
-        firedMCID := sched.io.out.a.bits.mcid
-        dramBankTarget := ( sched.io.out.a.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-        printf("LLC: read out fired domain %d\n", firedRCID)
-      }
-
-      (firedRCID: UInt, firedMCID: UInt, dramBankTarget: UInt)
-    }
+    // Assumption that only one bank fires in a given cycle
+    assert(PopCount(mods.map(_.io.out.a.fire)) <= 1.U)
+    val fires = mods.map(_.io.out.a.fire)
+    val fireAny = fires.reduce(_||_)
+    val firedMcid = Mux1H(fires, mods.map(_.io.out.a.bits.mcid))
+    val firedRcid = Mux1H(fires, mods.map(_.io.out.a.bits.rcid))
+    val firedBank = Mux1H(fires, mods.map(sched => sched.io.out.a.bits.address(dramBankOffset + dramBankBits - 1, dramBankOffset)))
 
     for ( i <- 0 until nMCID ) {
-      val didMCIDFireAcquire = activeAcquires.map{ case (_, mcid, _) => mcid === i.U }.reduce(_||_)
-      
+      val didMCIDFireAcquire = fireAny && firedMcid === i.U
+
       when ( mcidStates(i) === s_mcid_count ) {
         mcidCounters(i) := didMCIDFireAcquire + mcidCounters(i)
       } .elsewhen ( mcidStates(i) === s_mcid_hold ) {
@@ -318,15 +311,16 @@ class InclusiveCache(
     }
 
     for ( i <- 0 until nRCID ) {
-      val didRCIDFireAcquire = activeAcquires.map{ case (rcid, _, _) => rcid === i.U }.reduce(_||_)
+      val didRCIDFireAcquire = fireAny && firedRcid === i.U
 
       for ( j <- 0 until nDramBanks ) {
-        val didTargetBank = activeAcquires.map{ case (_, _, bank) => bank === j.U }.reduce(_||_) && didRCIDFireAcquire
-        bankReadCntrs(i)(j) := Mux(periodReset || !mmio.module.io.enGlobal, 0.U + didTargetBank, didTargetBank + bankReadCntrs(i)(j))
+        val didTargetBank = didRCIDFireAcquire && firedBank === j.U
+        val cntrMSB = bankReadCntrs(i)(j)(cntrBits - 1)
+        bankReadCntrs(i)(j) := Mux(periodReset || !mmio.module.io.enGlobal, (maxReads(i) -& 1.U) - didTargetBank, 
+          Mux(!cntrMSB, bankReadCntrs(i)(j) - didTargetBank, bankReadCntrs(i)(j)))
 
-        val throttleBit = (bankReadCntrs(i)(j) >= maxReads(i)) && mmio.module.io.enGlobal
-        throttleRegs(i)(j) := throttleBit
-        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := throttleRegs(i)(j) )
+        val throttleBit = cntrMSB && mmio.module.io.enGlobal
+        mods.foreach( sched => sched.io.throttle(i).dramBank(j) := throttleBit )
       }
     }
 

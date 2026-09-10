@@ -32,7 +32,6 @@ case class InclusiveCacheParams(
   ways: Int,
   sets: Int,
   hintsSkipProbe: Boolean = false, // do hints probe the same client
-  outerMSHRs: Int,
   nRCID: Int,
   nMCID: Int,
   cbqriVer: Int,
@@ -45,6 +44,7 @@ case class InclusiveCacheParams(
   writeBytes: Int, // backing store update granularity
   portFactor: Int, // numSubBanks = (widest TL port * portFactor) / writeBytes
   memCycles: Int,  // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
+  outerMSHRs: Int = 6, // # of MSHRs that can issue outer Acquires (excludes the B and C MSHRs)
   physicalFilter: Option[PhysicalFilterParams] = None,
   bankedControl: Boolean = false, // bank the cache ctrl with the cache banks
   ctrlAddr: Option[BigInt] = Some(InclusiveCacheParameters.L2ControlAddress),
@@ -64,7 +64,6 @@ class WithInclusiveCache(
   outerLatencyCycles: Int = 40,
   subBankingFactor: Int = 4,
   hintsSkipProbe: Boolean = false,
-  outerMSHRs: Int = 6,
   bankedControl: Boolean = false,
   ctrlAddr: Option[BigInt] = Some(InclusiveCacheParameters.L2ControlAddress),
   ctrlXType: ClockCrossingType = NoCrossing,
@@ -77,13 +76,13 @@ class WithInclusiveCache(
   pfx: Int = 0,
   mrbwb: Int = 52428,
   nDramBanks: Int = 8,
-  dramBankOffset: Int = 9 // assume we have shifted it for set partitioning
+  dramBankOffset: Int = 9, // assume we have shifted it for set partitioning
+  outerMSHRs: Int = 6
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
       ways = nWays,
       hintsSkipProbe = hintsSkipProbe,
-      outerMSHRs = outerMSHRs,
       nRCID = nRCID,
       nMCID = nMCID,
       cbqriVer = cbqriVer,
@@ -94,6 +93,7 @@ class WithInclusiveCache(
       nDramBanks = nDramBanks,
       dramBankOffset = dramBankOffset,
       memCycles = outerLatencyCycles,
+      outerMSHRs = outerMSHRs,
       writeBytes = writeBytes,
       portFactor = subBankingFactor,
       bankedControl = bankedControl,
@@ -153,12 +153,12 @@ class WithInclusiveCache(
         dramBankOffset = dramBankOffset,
         blockBytes = sbus.blockBytes,
         beatBytes = sbus.beatBytes,
-        hintsSkipProbe = hintsSkipProbe,
-        outerMSHRs = outerMSHRs),
+        hintsSkipProbe = hintsSkipProbe),
       InclusiveCacheMicroParameters(
         writeBytes = writeBytes,
         portFactor = portFactor,
         memCycles = memCycles,
+        outerMSHRs = outerMSHRs,
         innerBuf = bufInnerInterior,
         outerBuf = bufOuterInterior),
       l2Ctrl))

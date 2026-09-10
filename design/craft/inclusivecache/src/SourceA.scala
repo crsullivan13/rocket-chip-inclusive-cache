@@ -30,8 +30,8 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val param  = UInt(3.W)
   val source = UInt(params.outer.bundle.sourceBits.W)
   val block  = Bool()
-  val rcid = UInt(6.W)
-  val mcid = UInt(6.W)
+  val rcid   = UInt(log2Up(params.cache.nRCID).W)
+  val mcid   = UInt(log2Up(params.cache.nMCID).W)
 }
 
 class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
@@ -41,24 +41,17 @@ class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dra
     val rcidReadys = Output(Vec(nRCID, Bool()))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
     val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
-    //val outerAcquireInfo = Output(new OuterAcquireInfo())
   })
 
   // ready must be a register, because we derive valid from ready
   require (!params.micro.outerBuf.a.pipe && params.micro.outerBuf.a.isDefined)
 
-  // io.outerAcquireInfo.didFireAcquire := a.fire && a.bits.opcode === TLMessages.AcquireBlock
-  // io.outerAcquireInfo.dramBank := (a.bits.address >> 13.U) & 7.U // magic numbers are 8KB rows and 8 banks
-  // io.outerAcquireInfo.regulationDomain := a.bits.domainId
   val rcidAs = Seq.fill(nRCID)(Wire(chiselTypeOf(io.a)))
   val rcidBuffs = rcidAs.map( a => { params.micro.outerBuf.a(a) } )
 
   val rcidReadys = Wire(Vec(nRCID, Bool()))
 
   val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle), nRCID))
-
-  // io.outerAcquireInfo.didFireAcquire := io.a.fire
-  // io.outerAcquireInfo.regulationDomain := io.a.bits.domainId // when setup
 
   for ( i <- 0 until nRCID ) {
     val a = rcidAs(i)
@@ -76,12 +69,9 @@ class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dra
 
     a.valid := io.req.valid && io.req.bits.rcid === i.U
     params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
-    when ( a.valid && !a.ready ) {
-      SynthesizePrintf(printf("SourceA: Valid req, a not ready, domain %d\n", a.bits.rcid))
-    }
 
-    a.bits.rcid := io.req.bits.rcid
-    a.bits.mcid := io.req.bits.mcid
+    a.bits.rcid    := io.req.bits.rcid
+    a.bits.mcid    := io.req.bits.mcid
     a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
     a.bits.param   := io.req.bits.param
     a.bits.size    := params.offsetBits.U
@@ -94,8 +84,5 @@ class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dra
 
   io.a <> arb.io.out
 
-  // this should really be the ready of the buffer that corresponds to incomming request's domain
-  // doing that creates a combinational loop i haven't solved, andR of all for now
-  //io.req.ready := rcidAs.map( a => a.ready).reduce(_&&_)
   io.req.ready := MuxLookup(io.req.bits.rcid, rcidReadys(0))((0 until nRCID).map( i => i.U -> rcidReadys(i) ) )
 }

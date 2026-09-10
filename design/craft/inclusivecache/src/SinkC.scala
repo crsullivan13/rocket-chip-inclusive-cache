@@ -30,9 +30,6 @@ class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val source = UInt(params.inner.bundle.sourceBits.W)
   val param  = UInt(3.W)
   val data   = Bool()
-  //val domainId = UInt(2.W)
-  // val rcid = UInt(6.W)
-  // val mcid = UInt(6.W)
 }
 
 class PutBufferCEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)

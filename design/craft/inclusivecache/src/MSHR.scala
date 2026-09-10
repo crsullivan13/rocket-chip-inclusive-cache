@@ -50,8 +50,6 @@ class MSHRStatus(params: InclusiveCacheParameters) extends InclusiveCacheBundle(
   val nestB  = Bool()
   val blockC = Bool()
   val nestC  = Bool()
-  val rcid = UInt(6.W)
-  val mcid = UInt(6.W)
   val metaValid   = Bool()
   val victimTag   = UInt(params.tagBits.W)
   val victimValid = Bool()
@@ -100,8 +98,6 @@ class MSHR(params: InclusiveCacheParameters) extends Module
     val sinkd     = Flipped(Valid(new SinkDResponse(params)))
     val sinke     = Flipped(Valid(new SinkEResponse(params)))
     val nestedwb  = Flipped(new NestedWriteback(params))
-
-    //val throttle = Input(Vec(4, Bool()))
   })
 
   val request_valid = RegInit(false.B)
@@ -171,8 +167,6 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   }
 
   // Scheduler status
-  io.status.bits.rcid := request.rcid
-  io.status.bits.mcid := request.mcid
   io.status.valid := request_valid
   io.status.bits.set    := request.set
   io.status.bits.tag    := request.tag
