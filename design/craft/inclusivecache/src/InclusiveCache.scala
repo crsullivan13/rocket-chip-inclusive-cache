@@ -293,14 +293,8 @@ class InclusiveCache(
       val firedRCID = WireDefault(nRCID.U)
       val firedMCID = WireDefault(nMCID.U)
       val dramBankTarget = WireDefault(nDramBanks.U)
-      // serial_tl is some client, we should exclude it from our control
-      // for some reason it traverses the LLC
-      // i still don't really know what it is, but it isn't a core
-      val isSerialSrc = edgeIn.client.clients.filter(_.name.startsWith("serial_tl_"))
-          .map(c => c.sourceId.contains(sched.io.out.a.bits.source))
-          .reduce(_||_)
 
-      when ( didBankFireAcquire && !isSerialSrc ) {
+      when (didBankFireAcquire) {
         firedRCID := sched.io.out.a.bits.rcid
         firedMCID := sched.io.out.a.bits.mcid
         dramBankTarget := ( sched.io.out.a.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
