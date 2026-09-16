@@ -32,6 +32,7 @@ case class InclusiveCacheParams(
   ways: Int,
   sets: Int,
   hintsSkipProbe: Boolean = false, // do hints probe the same client
+  outerMSHRs: Int,
   nRCID: Int,
   nMCID: Int,
   cbqriVer: Int,
@@ -63,6 +64,7 @@ class WithInclusiveCache(
   outerLatencyCycles: Int = 40,
   subBankingFactor: Int = 4,
   hintsSkipProbe: Boolean = false,
+  outerMSHRs: Int = 6,
   bankedControl: Boolean = false,
   ctrlAddr: Option[BigInt] = Some(InclusiveCacheParameters.L2ControlAddress),
   ctrlXType: ClockCrossingType = NoCrossing,
@@ -81,6 +83,7 @@ class WithInclusiveCache(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
       ways = nWays,
       hintsSkipProbe = hintsSkipProbe,
+      outerMSHRs = outerMSHRs,
       nRCID = nRCID,
       nMCID = nMCID,
       cbqriVer = cbqriVer,
@@ -106,6 +109,7 @@ class WithInclusiveCache(
     val ways = icParams.ways
     val sets = icParams.sets
     val hintsSkipProbe = icParams.hintsSkipProbe
+    val outerMSHRs = icParams.outerMSHRs
     val nRCID = icParams.nRCID
     val nMCID = icParams.nMCID
     val cbqriVer = icParams.cbqriVer
@@ -149,7 +153,8 @@ class WithInclusiveCache(
         dramBankOffset = dramBankOffset,
         blockBytes = sbus.blockBytes,
         beatBytes = sbus.beatBytes,
-        hintsSkipProbe = hintsSkipProbe),
+        hintsSkipProbe = hintsSkipProbe,
+        outerMSHRs = outerMSHRs),
       InclusiveCacheMicroParameters(
         writeBytes = writeBytes,
         portFactor = portFactor,

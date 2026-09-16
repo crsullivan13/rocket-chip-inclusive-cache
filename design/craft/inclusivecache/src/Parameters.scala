@@ -34,6 +34,7 @@ case class CacheParameters(
   blockBytes:  Int,
   beatBytes:   Int, // inner
   hintsSkipProbe: Boolean,
+  outerMSHRs: Int,
   nRCID: Int,
   nMCID: Int,
   cbqriVer: Int,
@@ -305,7 +306,7 @@ object InclusiveCacheParameters
     // We need 2-3 normal MSHRs to cover the Directory latency
     // To fully exploit memory bandwidth-delay-product, we need memCyles/blockBeats MSHRs
     //max(if (micro.dirReg) 3 else 2, (micro.memCycles + cache.blockBeats - 1) / cache.blockBeats)
-    24
+    cache.outerMSHRs
   }
   def all_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int =
     // We need a dedicated MSHR for B+C each
