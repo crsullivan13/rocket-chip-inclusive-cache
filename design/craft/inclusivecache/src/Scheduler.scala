@@ -38,6 +38,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
     val req = Flipped(Decoupled(new SinkXRequest(params)))
     val resp = Decoupled(new SourceXRequest(params))
 
+    val wayPartMasks = Input(Vec(nRCID, UInt(params.cache.ways.W)))
     val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
   })
 
@@ -79,6 +80,14 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   val bc_mshr = mshrs.init.last
   val c_mshr = mshrs.last
   val nestedwb = Wire(new NestedWriteback(params))
+
+  val mshrOccupancy = WireInit(VecInit(Seq.fill(params.mshrs)(false.B)))
+  mshrs.zip(mshrOccupancy).foreach{ case (mshr, occupany) =>
+    occupany := mshr.io.status.valid
+  }
+
+  val numOccupied = PopCount(mshrOccupancy)
+  midas.targetutils.PerfCounter.identity(numOccupied, "num_llc_mshrs_occupied", "Number of LLC MSHRs valid at sample time")
 
   // Deliver messages from Sinks to MSHRs
   mshrs.zipWithIndex.foreach { case (m, i) =>
@@ -217,7 +226,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   val needsVictim = request.bits.prio(0) && !request.bits.control.flush
 
   // avoid race condition over unresolved meta data
-  val wayBlocked = unknownWay || (needsVictim && busyWays.andR)
+  val wayBlocked = unknownWay || (needsVictim && (busyWays | ~io.wayPartMasks(request.bits.rcid)).andR)
 
   assert (!(request.valid && alloc && queue), "alloc and queue must be mutually exclusive")
 
@@ -315,6 +324,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   val dirReadSet = Mux(mshr_uses_directory_for_lb, scheduleSet, request.bits.set)
   directory.io.read.bits.set := dirReadSet
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
+  directory.io.read.bits.wayPartMask := Mux(mshr_uses_directory_for_lb, io.wayPartMasks(requests.io.data.rcid), io.wayPartMasks(request.bits.rcid))
 
   // drive directory read based on busy ways if matching taget set
   val dirSameSetOH = Cat(mshrs.map(m => m.io.status.valid && m.io.status.bits.set === dirReadSet).reverse) &
