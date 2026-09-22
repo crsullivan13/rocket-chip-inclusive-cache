@@ -186,6 +186,13 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.status.bits.victimValid := meta_valid && !meta.hit && meta.state =/= INVALID
   io.status.bits.probeTag    := Mux(!w_rprobeacklast, meta.tag, request.tag)
 
+  when (io.status.bits.victimValid && s_release && w_rprobeacklast && w_releaseack) {
+    meta.dirty := false.B
+    meta.clients := 0.U
+    meta.state := INVALID
+    meta.tag := request.tag
+  }
+
   // We can only demand: block, nest, or queue
   assert (!io.status.bits.nestB || !io.status.bits.blockB)
   assert (!io.status.bits.nestC || !io.status.bits.blockC)

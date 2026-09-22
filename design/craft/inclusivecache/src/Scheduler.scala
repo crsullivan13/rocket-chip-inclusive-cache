@@ -203,8 +203,25 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
   val sameSetOH = Cat(mshrs.map(m => m.io.status.valid && m.io.status.bits.set === request.bits.set).reverse)
 
-  // queue if same line (matching tag and set)
+  // Two masks, deliberately different.
+  //
+  // lineMatches is ownership: the line an MSHR is working on OR the line it is
+  // evicting. It gates alloc (a second MSHR must never take an owned line) and
+  // selects whose blockB/blockC/nestB/nestC govern the request.
+  //
+  // mainMatches is queue eligibility, and covers only the line the MSHR is
+  // actively working on. Requests for a victim line are NOT queued behind the
+  // eviction; they are blocked (A) or nested (B/C) and retry once the eviction
+  // completes and the claim drops. That keeps an MSHR's queue single-tag, so a
+  // reload is always a `repeat`, the tag never changes under queued work, and
+  // ownership never has to outlive victimValid. Queueing onto the victim is what
+  // forced a claim to survive the eviction, and a one-deep claim cannot cover
+  // every line a queue accumulates -- the leftover line loses its owner and a
+  // second MSHR takes it (abc_dup_tag/abc_victim).
   val lineMatches = Cat(mshrs.map { m => m.io.status.valid && params.ownsLine(m.io.status.bits, request.bits.set, request.bits.tag) }.reverse)
+  val mainMatches = Cat(mshrs.map { m => m.io.status.valid &&
+                                         (m.io.status.bits.set === request.bits.set) &&
+                                         (m.io.status.bits.tag === request.bits.tag) }.reverse)
   val alloc = !lineMatches.orR // NOTE: no matches also means no BC or C pre-emption on this line
   // If a same-line MSHR says that requests of this type must be blocked (for bounded time), do it
   val blockB = Mux1H(lineMatches, mshrs.map(_.io.status.bits.blockB)) && request.bits.prio(1)
@@ -215,7 +232,11 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   val nestC  = Mux1H(lineMatches, mshrs.map(_.io.status.bits.nestC))  && request.bits.prio(2)
   // Prevent priority inversion; we may not queue to MSHRs beyond our level
   val prioFilter = Cat(request.bits.prio(2), !request.bits.prio(0), ~0.U((params.mshrs-2).W))
-  val lowerMatches = lineMatches & prioFilter
+  // Queue eligibility only, so this filters mainMatches, not lineMatches. A
+  // victim-only match therefore reaches neither queue nor alloc: if the owner
+  // does not block or nest it, request.ready simply stays low and the request
+  // retries.
+  val lowerMatches = mainMatches & prioFilter
   // If we match an MSHR <= our priority that neither blocks nor nests us, queue to it.
   val queue = lowerMatches.orR && !nestB && !nestC && !blockB && !blockC
 
@@ -368,6 +389,17 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   }
   c_mshr.io.allocate.bits.prio(0) := false.B
   c_mshr.io.allocate.bits.prio(1) := false.B
+
+  // The invariant that lets ownership stop at victimValid: because only
+  // mainMatches can queue, an MSHR's queue never holds anything but its active
+  // line, so reloading a live MSHR cannot change its tag. Fresh allocations
+  // (mshr_insertOH, and the nestB/nestC paths) always target an MSHR whose
+  // status.valid is low, so they are exempt. If this ever fires, some path has
+  // put a foreign tag in a queue and ownership has to outlive the eviction again.
+  mshrs.foreach { m =>
+    assert (!(m.io.allocate.valid && m.io.status.valid) || m.io.allocate.bits.repeat,
+            "reload changed an MSHR's tag: its queue should only hold its active line")
+  }
 
   // Fanout the result of the Directory lookup
   val dirTarget = Mux(alloc, mshr_insertOH, Mux(nestB,(BigInt(1) << (params.mshrs-2)).U,(BigInt(1) << (params.mshrs-1)).U))
