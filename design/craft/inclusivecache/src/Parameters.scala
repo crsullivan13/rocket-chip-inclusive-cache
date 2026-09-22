@@ -121,6 +121,7 @@ case class InclusiveCacheMicroParameters(
   dirReg:     Boolean = false,
   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.fullC, // or none
   outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full,  // or flowAE
+  outerMSHRs: Int,
   )
 {
   require (writeBytes > 0 && isPow2(writeBytes))
@@ -300,7 +301,7 @@ object InclusiveCacheParameters
   def out_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int = {
     // We need 2-3 normal MSHRs to cover the Directory latency
     // To fully exploit memory bandwidth-delay-product, we need memCyles/blockBeats MSHRs
-    max(if (micro.dirReg) 3 else 2, (micro.memCycles + cache.blockBeats - 1) / cache.blockBeats)
+    micro.outerMSHRs
   }
   def all_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int =
     // We need a dedicated MSHR for B+C each

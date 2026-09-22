@@ -44,7 +44,8 @@ case class InclusiveCacheParams(
   bufInnerInterior: InclusiveCachePortParameters = InclusiveCachePortParameters.fullC,
   bufInnerExterior: InclusiveCachePortParameters = InclusiveCachePortParameters.flowAD,
   bufOuterInterior: InclusiveCachePortParameters = InclusiveCachePortParameters.full,
-  bufOuterExterior: InclusiveCachePortParameters = InclusiveCachePortParameters.none)
+  bufOuterExterior: InclusiveCachePortParameters = InclusiveCachePortParameters.none,
+  outerMSHRs: Int)
 
 case object InclusiveCacheKey extends Field[InclusiveCacheParams]
 
@@ -57,7 +58,8 @@ class WithInclusiveCache(
   bankedControl: Boolean = false,
   ctrlAddr: Option[BigInt] = Some(InclusiveCacheParameters.L2ControlAddress),
   ctrlXType: ClockCrossingType = NoCrossing,
-  writeBytes: Int = 8
+  writeBytes: Int = 8,
+  outerMSHRs: Int = 6
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
       sets = (capacityKB * 1024)/(site(CacheBlockBytes) * nWays * up(SubsystemBankedCoherenceKey, site).nBanks),
@@ -68,7 +70,8 @@ class WithInclusiveCache(
       hintsSkipProbe = hintsSkipProbe,
       bankedControl = bankedControl,
       ctrlAddr = ctrlAddr,
-      ctrlXType = ctrlXType)
+      ctrlXType = ctrlXType,
+      outerMSHRs = outerMSHRs)
   case SubsystemBankedCoherenceKey => up(SubsystemBankedCoherenceKey, site).copy(coherenceManager = { context =>
     implicit val p = context.p
     val sbus = context.tlBusWrapperLocationMap(SBUS)
@@ -87,7 +90,8 @@ class WithInclusiveCache(
       bufInnerInterior,
       bufInnerExterior,
       bufOuterInterior,
-      bufOuterExterior) = p(InclusiveCacheKey)
+      bufOuterExterior,
+      outerMSHRs) = p(InclusiveCacheKey)
 
     val l2Ctrl = ctrlAddr.map { addr =>
       InclusiveCacheControlParameters(
@@ -108,7 +112,8 @@ class WithInclusiveCache(
         portFactor = portFactor,
         memCycles = memCycles,
         innerBuf = bufInnerInterior,
-        outerBuf = bufOuterInterior),
+        outerBuf = bufOuterInterior,
+        outerMSHRs = outerMSHRs),
       l2Ctrl))
 
     def skipMMIO(x: TLClientParameters) = {
