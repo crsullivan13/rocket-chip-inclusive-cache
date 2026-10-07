@@ -39,6 +39,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
     val resp = Decoupled(new SourceXRequest(params))
 
     val wayPartMasks = Input(Vec(nRCID, UInt(params.cache.ways.W)))
+    val mshrCapMask = Input(UInt((params.micro.outerMSHRs + 2).W))
     val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
   })
 
@@ -210,14 +211,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   // selects whose blockB/blockC/nestB/nestC govern the request.
   //
   // mainMatches is queue eligibility, and covers only the line the MSHR is
-  // actively working on. Requests for a victim line are NOT queued behind the
-  // eviction; they are blocked (A) or nested (B/C) and retry once the eviction
-  // completes and the claim drops. That keeps an MSHR's queue single-tag, so a
-  // reload is always a `repeat`, the tag never changes under queued work, and
-  // ownership never has to outlive victimValid. Queueing onto the victim is what
-  // forced a claim to survive the eviction, and a one-deep claim cannot cover
-  // every line a queue accumulates -- the leftover line loses its owner and a
-  // second MSHR takes it (abc_dup_tag/abc_victim).
+  // actively working on. Requests for a victim line are NOT queued until eviction completed.
   val lineMatches = Cat(mshrs.map { m => m.io.status.valid && params.ownsLine(m.io.status.bits, request.bits.set, request.bits.tag) }.reverse)
   val mainMatches = Cat(mshrs.map { m => m.io.status.valid &&
                                          (m.io.status.bits.set === request.bits.set) &&
@@ -329,7 +323,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
   // Is there an MSHR free for this request?
   val mshr_validOH = Cat(mshrs.map(_.io.status.valid).reverse)
-  val mshr_free = (~mshr_validOH & prioFilter).orR
+  val mshr_freeOH = ~mshr_validOH & prioFilter & (io.mshrCapMask | (3.U << params.micro.outerMSHRs))
+  val mshr_free = mshr_freeOH.orR
 
   // Fanout the request to the appropriate handler (if any)
   val bypassQueue = schedule.reload && bypassMatches
@@ -347,7 +342,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   directory.io.read.bits.tag := Mux(mshr_uses_directory_for_lb, requests.io.data.tag, request.bits.tag)
   directory.io.read.bits.wayPartMask := Mux(mshr_uses_directory_for_lb, io.wayPartMasks(requests.io.data.rcid), io.wayPartMasks(request.bits.rcid))
 
-  // drive directory read based on busy ways if matching taget set
+  // drive directory read based on busy ways if matching target set
   val dirSameSetOH = Cat(mshrs.map(m => m.io.status.valid && m.io.status.bits.set === dirReadSet).reverse) &
                      ~Mux(mshr_uses_directory_for_lb, mshr_selectOH, 0.U)
   val dirBusyWays = mshrs.zipWithIndex.map { case (m, i) =>
@@ -363,7 +358,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
       OHToUInt(lowerMatches1 << params.mshrs*1),
       OHToUInt(lowerMatches1 << params.mshrs*2)))
 
-  val mshr_insertOH = ~(leftOR(~mshr_validOH) << 1) & ~mshr_validOH & prioFilter
+  val mshr_insertOH = ~(leftOR(mshr_freeOH) << 1) & mshr_freeOH
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>
     when (request.valid && alloc && !wayBlocked && s && !mshr_uses_directory_assuming_no_bypass) {
       m.io.allocate.valid := true.B
@@ -453,16 +448,16 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
   assert (!abcSlotShare, "two abc MSHRs own the same physical (set, way) slot")
 
-  midas.targetutils.PerfCounter(dupTagResolved, "abc_dup_tag_resolved",
-    "Two abc MSHRs own the same line: duplicate tag, both past their directory read")
-  midas.targetutils.PerfCounter(dupTagUnresolved, "abc_dup_tag_unresolved",
-    "Two abc MSHRs own the same line: duplicate tag, one still mid-resolution")
-  midas.targetutils.PerfCounter(victimResolved, "abc_victim_resolved",
-    "Two abc MSHRs own the same line via victimTag, both past their directory read")
-  midas.targetutils.PerfCounter(victimUnresolved, "abc_victim_unresolved",
-    "Two abc MSHRs own the same line via victimTag, one still mid-resolution")
-  midas.targetutils.PerfCounter(abcSlotShare, "abc_slot_share",
-    "Two abc MSHRs own the same physical (set, way) slot")
+  //midas.targetutils.PerfCounter(dupTagResolved, "abc_dup_tag_resolved",
+  //  "Two abc MSHRs own the same line: duplicate tag, both past their directory read")
+  //midas.targetutils.PerfCounter(dupTagUnresolved, "abc_dup_tag_unresolved",
+  //  "Two abc MSHRs own the same line: duplicate tag, one still mid-resolution")
+  //midas.targetutils.PerfCounter(victimResolved, "abc_victim_resolved",
+  //  "Two abc MSHRs own the same line via victimTag, both past their directory read")
+  //midas.targetutils.PerfCounter(victimUnresolved, "abc_victim_unresolved",
+  //  "Two abc MSHRs own the same line via victimTag, one still mid-resolution")
+  //midas.targetutils.PerfCounter(abcSlotShare, "abc_slot_share",
+  //  "Two abc MSHRs own the same physical (set, way) slot")
 
   // The nesting case: a pre-emption MSHR sharing a line or a physical slot with an abc MSHR.
   // Legal (see above), so covered rather than asserted -- but worth counting, because it is
@@ -480,10 +475,10 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
                 "A pre-emption MSHR owns the same line as the abc MSHR it nested under")
   params.ccover(nestedSlotShare, "SCHEDULER_NESTED_SLOT_SHARE",
                 "A pre-emption MSHR owns the same physical (set, way) slot as an abc MSHR")
-  midas.targetutils.PerfCounter(nestedLineShare, "nested_line_share",
-    "A pre-emption MSHR owns the same line as the abc MSHR it nested under")
-  midas.targetutils.PerfCounter(nestedSlotShare, "nested_slot_share",
-    "A pre-emption MSHR owns the same physical (set, way) slot as an abc MSHR")
+  //midas.targetutils.PerfCounter(nestedLineShare, "nested_line_share",
+  //  "A pre-emption MSHR owns the same line as the abc MSHR it nested under")
+  //midas.targetutils.PerfCounter(nestedSlotShare, "nested_slot_share",
+  //  "A pre-emption MSHR owns the same physical (set, way) slot as an abc MSHR")
 
   sinkD.io.way := VecInit(mshrs.map(_.io.status.bits.way))(sinkD.io.source)
   sinkD.io.set := VecInit(mshrs.map(_.io.status.bits.set))(sinkD.io.source)

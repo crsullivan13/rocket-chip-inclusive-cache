@@ -102,7 +102,8 @@ class InclusiveCache(
     clientFn  = { _ => TLClientPortParameters(Seq(TLClientParameters(
       name          = s"L${cache.level} InclusiveCache",
       sourceId      = IdRange(0, InclusiveCacheParameters.out_mshrs(cache, micro)),
-      supportsProbe = xfer)))
+      supportsProbe = xfer)),
+      requestFields = Seq(CBQRIFields()))
     },
     managerFn = { m => TLManagerPortParameters(
       managers = m.managers.map { m => m.copy(
@@ -121,7 +122,8 @@ class InclusiveCache(
       },
       beatBytes  = cache.beatBytes,
       endSinkId  = InclusiveCacheParameters.all_mshrs(cache, micro),
-      minLatency = 2)
+      minLatency = 2,
+      requestKeys = Seq(CBQRIKey))
     })
 
   val ctrls = control.map { c =>
@@ -212,6 +214,10 @@ class InclusiveCache(
       // interp zero mask as all 1s to be safe
       Mux(localMask.orR, localMask, ~0.U(cache.ways.W))
     })
+
+    mods.foreach { sched =>
+      sched.io.mshrCapMask := Mux(mmio.module.io.mshrCapMask(micro.outerMSHRs-1,0).orR, mmio.module.io.mshrCapMask, ~0.U((micro.outerMSHRs + 2).W))
+    }
 
     mmio.module.io.bc_mon_resp.valid := false.B
     mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.OK
@@ -310,6 +316,23 @@ class InclusiveCache(
       midas.targetutils.PerfCounter(llcPuts(i), s"llc_bank${i}_puts", s"LLC bank ${i} puts")
     }
 
+    // Per-RCID in/out reads/writes summed across banks
+    for ( r <- 0 until nRCID ) {
+      val rcidAccs = mods.map( sched => sched.io.in.a.fire && sched.io.in.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.Get) && sched.io.in.a.bits.user.lift(CBQRIKey).map(_.rcid).getOrElse(0.U) === r.U )
+      val rcidMisses = mods.map( sched => sched.io.out.a.fire && sched.io.out.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.Get) && sched.io.out.a.bits.user.lift(CBQRIKey).map(_.rcid).getOrElse(0.U) === r.U )
+      midas.targetutils.PerfCounter(PopCount(rcidAccs), s"llc_rcid${r}_reads", s"LLC AcquireBlock/Get accesses from RCID ${r}")
+      midas.targetutils.PerfCounter(PopCount(rcidMisses), s"llc_rcid${r}_read_misses", s"LLC AcquireBlock/Get sent to DRAM for RCID ${r}")
+
+      val rcidWrIn = mods.zip(node.edges.in).map{ case (sched, edgeIn) =>
+        sched.io.in.c.fire && sched.io.in.c.bits.opcode.isOneOf(TLMessages.ReleaseData, TLMessages.ProbeAckData) && edgeIn.first(sched.io.in.c) && sched.io.in.c.bits.user.lift(CBQRIKey).map(_.rcid).getOrElse(0.U) === r.U
+      }
+      val rcidWrOut = mods.zip(node.edges.out).map{ case (sched, edgeOut) =>
+        sched.io.out.c.fire && sched.io.out.c.bits.opcode === TLMessages.ReleaseData && edgeOut.first(sched.io.out.c) && sched.io.out.c.bits.user.lift(CBQRIKey).map(_.rcid).getOrElse(0.U) === r.U
+      }
+      midas.targetutils.PerfCounter(PopCount(rcidWrIn), s"llc_rcid${r}_writes", s"LLC ReleaseData/ProbeAckData from RCID ${r}")
+      midas.targetutils.PerfCounter(PopCount(rcidWrOut), s"llc_rcid${r}_writebacks", s"LLC ReleaseData to DRAM attributed to RCID ${r}")
+    }
+
     periodReset := periodCount >= mmio.module.io.periodLen
     periodCount := Mux(periodReset || !mmio.module.io.enGlobal, 0.U, periodCount + 1.U)
 
@@ -317,9 +340,18 @@ class InclusiveCache(
     val firesAcquireBlockOrGet = mods.map(sched => sched.io.out.a.fire && sched.io.out.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.Get))
     assert(PopCount(firesAcquireBlockOrGet) <= 1.U)
     val fireAny = firesAcquireBlockOrGet.reduce(_||_)
-    val firedMcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.mcid))
-    val firedRcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.rcid))
+    val firedMcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.user(CBQRIKey).mcid))
+    val firedRcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.user(CBQRIKey).rcid))
     val firedBank = Mux1H(firesAcquireBlockOrGet, mods.map(sched => sched.io.out.a.bits.address(dramBankOffset + dramBankBits - 1, dramBankOffset)))
+
+    // autocounter for outstanding reads
+    val outstanding = RegInit(0.U(16.W))
+    val recvsGrantData = mods.zip(node.edges.out).map{ case (sched, edgeOut) =>
+      sched.io.out.d.fire && sched.io.out.d.bits.opcode === TLMessages.GrantData && edgeOut.first(sched.io.out.d)
+    }
+    outstanding := outstanding + PopCount(firesAcquireBlockOrGet) - PopCount(recvsGrantData)
+    midas.targetutils.PerfCounter.identity(outstanding, "outstanding_llc_reads_to_dram", "Reads fired from LLC to DRAM, awaiting response")
+    // end autocounter for outstanding reads
 
     for ( i <- 0 until nMCID ) {
       val didMCIDFireAcquire = fireAny && firedMcid === i.U

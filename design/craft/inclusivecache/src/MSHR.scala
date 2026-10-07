@@ -302,8 +302,8 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.a.bits.block   := request.size =/= log2Ceil(params.cache.blockBytes).U ||
                                      !(request.opcode === PutFullData || request.opcode === AcquirePerm)
   io.schedule.bits.a.bits.source  := 0.U
-  io.schedule.bits.a.bits.rcid := request.rcid
-  io.schedule.bits.a.bits.mcid := request.mcid
+  io.schedule.bits.a.bits.rcid    := request.rcid
+  io.schedule.bits.a.bits.mcid    := request.mcid
   io.schedule.bits.b.bits.param   := Mux(!s_rprobe, toN, Mux(request.prio(1), request.param, Mux(req_needT, toN, toB)))
   io.schedule.bits.b.bits.tag     := Mux(!s_rprobe, meta.tag, request.tag)
   io.schedule.bits.b.bits.set     := request.set
@@ -311,11 +311,12 @@ class MSHR(params: InclusiveCacheParameters) extends Module
   io.schedule.bits.c.bits.opcode  := Mux(meta.dirty, ReleaseData, Release)
   io.schedule.bits.c.bits.param   := Mux(meta.state === BRANCH, BtoN, TtoN)
   io.schedule.bits.c.bits.source  := 0.U
-  //io.schedule.bits.c.bits.domainId := request.domainId
   io.schedule.bits.c.bits.tag     := meta.tag
   io.schedule.bits.c.bits.set     := request.set
   io.schedule.bits.c.bits.way     := meta.way
   io.schedule.bits.c.bits.dirty   := meta.dirty
+  io.schedule.bits.c.bits.rcid    := request.rcid
+  io.schedule.bits.c.bits.mcid    := request.mcid
   io.schedule.bits.d.bits.viewAsSupertype(chiselTypeOf(request)) := request
   io.schedule.bits.d.bits.param   := Mux(!req_acquire, request.param,
                                        MuxLookup(request.param, request.param)(Seq(

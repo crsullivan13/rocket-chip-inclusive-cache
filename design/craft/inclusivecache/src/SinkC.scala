@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import freechips.rocketchip.subsystem.{CBQRIKey}
 
 class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -30,6 +31,8 @@ class SinkCResponse(params: InclusiveCacheParameters) extends InclusiveCacheBund
   val source = UInt(params.inner.bundle.sourceBits.W)
   val param  = UInt(3.W)
   val data   = Bool()
+  val rcid   = UInt(log2Up(params.cache.nRCID).W)
+  val mcid   = UInt(log2Up(params.cache.nMCID).W)
 }
 
 class PutBufferCEntry(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -118,9 +121,8 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.resp.bits.source := c.bits.source
     io.resp.bits.param  := c.bits.param
     io.resp.bits.data   := hasData
-    //io.resp.bits.domainId := c.bits.domainId
-    // io.resp.bits.rcid := c.bits.rcid
-    // io.resp.bits.mcid := c.bits.mcid
+    io.resp.bits.rcid   := c.bits.user.lift(CBQRIKey).map(_.rcid).getOrElse(0.U)
+    io.resp.bits.mcid   := c.bits.user.lift(CBQRIKey).map(_.mcid).getOrElse(0.U)
 
     val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferCEntry(params), params.relLists, params.relBeats, false)))
     val lists = RegInit(0.U(params.relLists.W))
@@ -160,8 +162,8 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     io.req.bits.set                := set
     io.req.bits.tag                := tag
     io.req.bits.put                := put
-    io.req.bits.rcid               := 0.U
-    io.req.bits.mcid               := 0.U
+    io.req.bits.rcid               := c.bits.user.lift(CBQRIKey).map(_.rcid).getOrElse(0.U)
+    io.req.bits.mcid               := c.bits.user.lift(CBQRIKey).map(_.mcid).getOrElse(0.U)
 
     putbuffer.io.push.bits.index := put
     putbuffer.io.push.bits.data.data    := c.bits.data

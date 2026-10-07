@@ -22,6 +22,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink._
 
 import midas.targetutils.SynthesizePrintf
+import freechips.rocketchip.subsystem.CBQRIKey
 
 class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
 {
@@ -70,8 +71,8 @@ class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dra
     a.valid := io.req.valid && io.req.bits.rcid === i.U
     params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
 
-    a.bits.rcid    := io.req.bits.rcid
-    a.bits.mcid    := io.req.bits.mcid
+    a.bits.user(CBQRIKey).rcid    := io.req.bits.rcid
+    a.bits.user(CBQRIKey).mcid    := io.req.bits.mcid
     a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
     a.bits.param   := io.req.bits.param
     a.bits.size    := params.offsetBits.U

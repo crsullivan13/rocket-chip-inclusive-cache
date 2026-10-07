@@ -21,6 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
+import freechips.rocketchip.subsystem.{CBQRIKey}
 
 import midas.targetutils.SynthesizePrintf
 
@@ -95,8 +96,8 @@ class SinkA(params: InclusiveCacheParameters) extends Module
   io.req.bits.set                := set
   io.req.bits.tag                := tag
   io.req.bits.put                := put
-  io.req.bits.rcid               := a.bits.rcid
-  io.req.bits.mcid               := a.bits.mcid
+  io.req.bits.rcid               := a.bits.user.lift(CBQRIKey).map(_.rcid).getOrElse(0.U)
+  io.req.bits.mcid               := a.bits.user.lift(CBQRIKey).map(_.mcid).getOrElse(0.U)
 
   putbuffer.io.push.bits.index := put
   putbuffer.io.push.bits.data.data    := a.bits.data
