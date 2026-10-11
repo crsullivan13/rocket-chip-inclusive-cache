@@ -206,6 +206,11 @@ class WithInclusiveCache(
         l2.mmio.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
+    sbus.memTrafficControl match {
+      case Some(bru: PerBankLLC) => bru.dramActAcquire := l2.dramActAcquire
+      case _ => l2.dramActAcquire.makeSink()
+    }
+
     ElaborationArtefacts.add("l2.json", l2.module.json)
     (filter.node, lastLevelNode, None)
   })

@@ -26,7 +26,7 @@ import chisel3.experimental.dataview._
 
 import midas.targetutils.SynthesizePrintf
 
-class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
+class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int) extends Module
 {
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(params.inner.bundle))
@@ -40,10 +40,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
     val wayPartMasks = Input(Vec(nRCID, UInt(params.cache.ways.W)))
     val mshrCapMask = Input(UInt((params.micro.outerMSHRs + 2).W))
-    val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
   })
 
-  val sourceA = Module(new SourceA(params, nRCID, nDramBanks, dramBankOffset))
+  val sourceA = Module(new SourceA(params))
   val sourceB = Module(new SourceB(params))
   val sourceC = Module(new SourceC(params))
   val sourceD = Module(new SourceD(params))
@@ -51,9 +50,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   val sourceX = Module(new SourceX(params))
 
   io.out.a <> sourceA.io.a
-  sourceA.io.throttle := io.throttle
   io.out.c <> sourceC.io.c
-  //sourceC.io.throttle := io.throttle
   io.out.e <> sourceE.io.e
   io.in.b <> sourceB.io.b
   io.in.d <> sourceD.io.d
@@ -131,7 +128,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   // Consider scheduling an MSHR only if all the resources it requires are available
   val mshr_request = Cat(((mshrs zip mshr_stall) zip mshrSetUnresolved).map { case ((m, s), u) =>
     val base = m.io.schedule.valid && !s && !(m.io.schedule.bits.reload && u) &&
-      (sourceA.io.rcidReadys(m.io.schedule.bits.a.bits.rcid) || !m.io.schedule.bits.a.valid) &&
+      (sourceA.io.req.ready || !m.io.schedule.bits.a.valid) &&
       (sourceB.io.req.ready || !m.io.schedule.bits.b.valid) &&
       (sourceC.io.req.ready || !m.io.schedule.bits.c.valid) &&
       (sourceD.io.req.ready || !m.io.schedule.bits.d.valid) &&
@@ -139,11 +136,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
       (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
 
-      val mshrDramBankTarget = ( params.expandAddress(m.io.schedule.bits.a.bits.tag, m.io.schedule.bits.a.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-      val shouldThrottle = io.throttle(m.io.schedule.bits.a.bits.rcid).dramBank(mshrDramBankTarget)
-      val noThrottle = !(m.io.schedule.bits.a.valid && shouldThrottle)
-
-      base && noThrottle
+      base
   }.reverse)
 
   // Round-robin arbitration of MSHRs

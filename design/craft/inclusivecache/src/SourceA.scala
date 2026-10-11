@@ -20,8 +20,6 @@ package sifive.blocks.inclusivecache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
-
-import midas.targetutils.SynthesizePrintf
 import freechips.rocketchip.subsystem.CBQRIKey
 
 class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBundle(params)
@@ -35,55 +33,31 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val mcid   = UInt(log2Up(params.cache.nMCID).W)
 }
 
-class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
+class SourceA(params: InclusiveCacheParameters) extends Module
 {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
-    val rcidReadys = Output(Vec(nRCID, Bool()))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
-    val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
   })
 
   // ready must be a register, because we derive valid from ready
   require (!params.micro.outerBuf.a.pipe && params.micro.outerBuf.a.isDefined)
 
-  val rcidAs = Seq.fill(nRCID)(Wire(chiselTypeOf(io.a)))
-  val rcidBuffs = rcidAs.map( a => { params.micro.outerBuf.a(a) } )
+  val a = Wire(chiselTypeOf(io.a))
+  io.a <> params.micro.outerBuf.a(a)
 
-  val rcidReadys = Wire(Vec(nRCID, Bool()))
+  io.req.ready := a.ready
+  a.valid := io.req.valid
+  params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
 
-  val arb = Module(new RRArbiter(new TLBundleA(params.outer.bundle), nRCID))
-
-  for ( i <- 0 until nRCID ) {
-    val a = rcidAs(i)
-    val buffer = rcidBuffs(i)
-
-    val buffHeadDramBankTarget = ( buffer.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
-    val shouldThrottle = io.throttle(i).dramBank(buffHeadDramBankTarget)
-
-    io.rcidReadys(i) := a.ready
-    rcidReadys(i) := a.ready
-
-    arb.io.in(i) <> buffer
-    buffer.ready := arb.io.in(i).ready && !(shouldThrottle)
-    arb.io.in(i).valid := buffer.valid && !(shouldThrottle)
-
-    a.valid := io.req.valid && io.req.bits.rcid === i.U
-    params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")
-
-    a.bits.user(CBQRIKey).rcid    := io.req.bits.rcid
-    a.bits.user(CBQRIKey).mcid    := io.req.bits.mcid
-    a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
-    a.bits.param   := io.req.bits.param
-    a.bits.size    := params.offsetBits.U
-    a.bits.source  := io.req.bits.source
-    a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, 0.U)
-    a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
-    a.bits.data    := 0.U
-    a.bits.corrupt := false.B
-  }
-
-  io.a <> arb.io.out
-
-  io.req.ready := MuxLookup(io.req.bits.rcid, rcidReadys(0))((0 until nRCID).map( i => i.U -> rcidReadys(i) ) )
+  a.bits.user(CBQRIKey).rcid := io.req.bits.rcid
+  a.bits.user(CBQRIKey).mcid := io.req.bits.mcid
+  a.bits.opcode  := Mux(io.req.bits.block, TLMessages.AcquireBlock, TLMessages.AcquirePerm)
+  a.bits.param   := io.req.bits.param
+  a.bits.size    := params.offsetBits.U
+  a.bits.source  := io.req.bits.source
+  a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, 0.U)
+  a.bits.mask    := ~0.U(params.outer.manager.beatBytes.W)
+  a.bits.data    := 0.U
+  a.bits.corrupt := false.B
 }
