@@ -215,10 +215,6 @@ class InclusiveCache(
       Mux(localMask.orR, localMask, ~0.U(cache.ways.W))
     })
 
-    mods.foreach { sched =>
-      sched.io.mshrCapMask := Mux(mmio.module.io.mshrCapMask(micro.outerMSHRs-1,0).orR, mmio.module.io.mshrCapMask, ~0.U((micro.outerMSHRs + 2).W))
-    }
-
     mmio.module.io.bc_mon_resp.valid := false.B
     mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.OK
     mmio.module.io.bc_mon_resp.bits.hasData := false.B
@@ -296,25 +292,25 @@ class InclusiveCache(
       }
     }
 
-    val llcReads = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
-    val llcRels = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
-    val llcProbeAcks = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
-    val llcPuts = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
-    mods.zip(node.edges.in).zipWithIndex.foreach{ case ((sched, edgeIn), i) =>
-      val isFirstC = edgeIn.first(sched.io.in.c)
-      val isFirstA = edgeIn.first(sched.io.in.a)
-      llcReads(i) := sched.io.in.a.fire && sched.io.in.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.Get)
-      llcRels(i) := sched.io.in.c.fire && sched.io.in.c.bits.opcode === TLMessages.ReleaseData && isFirstC
-      llcProbeAcks(i) := sched.io.in.c.fire && sched.io.in.c.bits.opcode === TLMessages.ProbeAckData && isFirstC
-      llcPuts(i) := sched.io.in.a.fire && sched.io.in.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData) && isFirstA
-    }
+    //val llcReads = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
+    //val llcRels = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
+    //val llcProbeAcks = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
+    //val llcPuts = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
+    //mods.zip(node.edges.in).zipWithIndex.foreach{ case ((sched, edgeIn), i) =>
+    //  val isFirstC = edgeIn.first(sched.io.in.c)
+    //  val isFirstA = edgeIn.first(sched.io.in.a)
+    //  llcReads(i) := sched.io.in.a.fire && sched.io.in.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.Get)
+    //  llcRels(i) := sched.io.in.c.fire && sched.io.in.c.bits.opcode === TLMessages.ReleaseData && isFirstC
+    //  llcProbeAcks(i) := sched.io.in.c.fire && sched.io.in.c.bits.opcode === TLMessages.ProbeAckData && isFirstC
+    //  llcPuts(i) := sched.io.in.a.fire && sched.io.in.a.bits.opcode.isOneOf(TLMessages.PutFullData, TLMessages.PutPartialData) && isFirstA
+    //}
 
-    mods.indices.foreach{ i =>
-      midas.targetutils.PerfCounter(llcReads(i), s"llc_bank${i}_reads", s"LLC bank ${i} reads")
-      midas.targetutils.PerfCounter(llcRels(i), s"llc_bank${i}_releases", s"LLC bank ${i} releases")
-      midas.targetutils.PerfCounter(llcProbeAcks(i), s"llc_bank${i}_probe_acks", s"LLC bank ${i} probe acks")
-      midas.targetutils.PerfCounter(llcPuts(i), s"llc_bank${i}_puts", s"LLC bank ${i} puts")
-    }
+    //mods.indices.foreach{ i =>
+    //  midas.targetutils.PerfCounter(llcReads(i), s"llc_bank${i}_reads", s"LLC bank ${i} reads")
+    //  midas.targetutils.PerfCounter(llcRels(i), s"llc_bank${i}_releases", s"LLC bank ${i} releases")
+    //  midas.targetutils.PerfCounter(llcProbeAcks(i), s"llc_bank${i}_probe_acks", s"LLC bank ${i} probe acks")
+    //  midas.targetutils.PerfCounter(llcPuts(i), s"llc_bank${i}_puts", s"LLC bank ${i} puts")
+    //}
 
     // Per-RCID in/out reads/writes summed across banks
     for ( r <- 0 until nRCID ) {
@@ -350,7 +346,7 @@ class InclusiveCache(
       sched.io.out.d.fire && sched.io.out.d.bits.opcode === TLMessages.GrantData && edgeOut.first(sched.io.out.d)
     }
     outstanding := outstanding + PopCount(firesAcquireBlockOrGet) - PopCount(recvsGrantData)
-    midas.targetutils.PerfCounter.identity(outstanding, "outstanding_llc_reads_to_dram", "Reads fired from LLC to DRAM, awaiting response")
+    //midas.targetutils.PerfCounter.identity(outstanding, "outstanding_llc_reads_to_dram", "Reads fired from LLC to DRAM, awaiting response")
     // end autocounter for outstanding reads
 
     for ( i <- 0 until nMCID ) {

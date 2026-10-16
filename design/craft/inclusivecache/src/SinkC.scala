@@ -143,6 +143,10 @@ class SinkC(params: InclusiveCacheParameters) extends Module
     params.ccover(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
     params.ccover(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
 
+    //midas.targetutils.PerfCounter(c.valid && !raw_resp && req_block, "SINKC_REQ_STALL", "No MSHR available to sink request")
+    //midas.targetutils.PerfCounter(c.valid && !raw_resp && buf_block, "SINKC_BUF_STALL", "No space in putbuffer for beat")
+    //midas.targetutils.PerfCounter(c.valid && !raw_resp && set_block, "SINKC_SET_STALL", "No space in putbuffer for request")
+
     c.ready := Mux(raw_resp, !hasData || bs_adr.ready, !req_block && !buf_block && !set_block)
 
     io.req.valid := !resp && c.valid && first && !buf_block && !set_block

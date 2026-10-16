@@ -138,6 +138,8 @@ class SourceD(params: InclusiveCacheParameters) extends Module
   params.ccover(s1_valid && !s2_ready, "SOURCED_1_STALL", "Stage 1 pipeline blocked")
 
   io.req.ready := !busy
+  //midas.targetutils.PerfCounter(busy, "llc_sourced_busy", "SourceD stage 1 occupied")
+  //midas.targetutils.PerfCounter(s1_valid && !s2_ready, "llc_sourced_s1_stall", "SourceD stage 1 blocked by stage 2")
   s1_valid := (busy || io.req.valid) && (!s1_valid_r || io.bs_radr.ready)
 
   ////////////////////////////////////// STAGE 2 //////////////////////////////////////
@@ -169,8 +171,10 @@ class SourceD(params: InclusiveCacheParameters) extends Module
   io.rel_pop.bits.last  := s2_last
 
   params.ccover(io.pb_pop.valid && !io.pb_pop.ready, "SOURCED_2_PUTA_STALL", "Channel A put buffer was not ready in time")
-  if (!params.firstLevel)
+  if (!params.firstLevel) {
     params.ccover(io.rel_pop.valid && !io.rel_pop.ready, "SOURCED_2_PUTC_STALL", "Channel C put buffer was not ready in time")
+    //midas.targetutils.PerfCounter(io.rel_pop.valid && !io.rel_pop.ready, "llc_sourced_putc_stall", "SourceD waiting on Release data in put buffer")
+  }
 
   val pb_ready = Mux(s2_req.prio(0), io.pb_pop.ready, io.rel_pop.ready)
   when (pb_ready) { s2_valid_pb := false.B }

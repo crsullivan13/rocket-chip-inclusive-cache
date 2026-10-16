@@ -153,6 +153,8 @@ class BankedStore(params: InclusiveCacheParameters) extends Module
 
   // See the comments above for why this prioritization is used
   val reqs = Seq(sinkC_req, sourceC_req, sinkD_req, sourceD_wreq, sourceD_rreq)
+  midas.targetutils.PerfCounter(io.sourceD_radr.valid && !io.sourceD_radr.ready, "llc_bs_sourced_read_stall", "SourceD data read blocked by bank conflict")
+  midas.targetutils.PerfCounter(io.sourceD_wadr.valid && !io.sourceD_wadr.ready, "llc_bs_sourced_write_stall", "SourceD data write blocked by bank conflict")
 
   // Connect priorities; note that even if a request does not go through due to failing
   // to obtain a needed subbank, it still blocks overlapping lower priority requests.

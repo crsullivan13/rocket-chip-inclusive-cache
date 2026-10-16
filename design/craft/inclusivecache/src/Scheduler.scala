@@ -39,7 +39,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
     val resp = Decoupled(new SourceXRequest(params))
 
     val wayPartMasks = Input(Vec(nRCID, UInt(params.cache.ways.W)))
-    val mshrCapMask = Input(UInt((params.micro.outerMSHRs + 2).W))
     val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
   })
 
@@ -89,6 +88,12 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
   val numOccupied = PopCount(mshrOccupancy)
   midas.targetutils.PerfCounter.identity(numOccupied, "num_llc_mshrs_occupied", "Number of LLC MSHRs valid at sample time")
+
+  // MSHRs with a ready D task blocked because SourceD is busy, split by Release vs A-channel origin
+  val d_waiting_rel = mshrs.map(m => m.io.schedule.valid && m.io.schedule.bits.d.valid && m.io.schedule.bits.d.bits.prio(2)).reduce(_||_)
+  val d_waiting_acq = mshrs.map(m => m.io.schedule.valid && m.io.schedule.bits.d.valid && m.io.schedule.bits.d.bits.prio(0)).reduce(_||_)
+  //midas.targetutils.PerfCounter(d_waiting_rel && !sourceD.io.req.ready, "llc_sourced_wait_rel", "Release D task waiting on busy SourceD")
+  //midas.targetutils.PerfCounter(d_waiting_acq && !sourceD.io.req.ready, "llc_sourced_wait_acq", "A-channel D task waiting on busy SourceD")
 
   // Deliver messages from Sinks to MSHRs
   mshrs.zipWithIndex.foreach { case (m, i) =>
@@ -265,7 +270,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
                 "SCHEDULER_FALSE_CONFLICT",
                 "Request serialized behind an MSHR holding a different line in the same set")
 
-  midas.targetutils.PerfCounter(request.valid && sameSetOH.orR && !trueLineMatch, "false_conflict", "Count of false mshr conflicts")
+  //midas.targetutils.PerfCounter(request.valid && sameSetOH.orR && !trueLineMatch, "false_conflict", "Count of false mshr conflicts")
 
   // It might happen that lowerMatches has >1 bit if the two special MSHRs are in-use
   // We want to Q to the highest matching priority MSHR.
@@ -323,7 +328,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
   // Is there an MSHR free for this request?
   val mshr_validOH = Cat(mshrs.map(_.io.status.valid).reverse)
-  val mshr_freeOH = ~mshr_validOH & prioFilter & (io.mshrCapMask | (3.U << params.micro.outerMSHRs))
+  val mshr_freeOH = ~mshr_validOH & prioFilter
   val mshr_free = mshr_freeOH.orR
 
   // Fanout the request to the appropriate handler (if any)
