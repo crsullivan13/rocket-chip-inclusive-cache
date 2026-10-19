@@ -59,7 +59,7 @@ class InclusiveCache(
     }
   }
 
-  val dramActAcquire = BundleBridgeSource(() => new ActiveAcquire(cache.nRCID, p(SubsystemBankedCoherenceKey).nBanks))
+  val dramActAcquire = BundleBridgeSource(() => new ActiveAcquire(cache.nRCID, node.edges.out.size, node.edges.out.head.bundle.addressBits))
 
   val cbqriParams = PerBankBwParams(0x21000000, cache.nRCID, cache.nMCID, cache.cbqriVer, cache.nbwblks, cache.rpfx, cache.pfx, cache.mrbwb)
   val mmio = LazyModule(new CBQRIBwController(regulationDevice, cbqriParams))
@@ -349,10 +349,11 @@ class InclusiveCache(
       }
     }
 
-    for ( i <- 0 until nRCID ) {
-      dramActAcquire.bundle.active(i) := PopCount(mods.zip(firesAcquireBlockOrGet).map { case (sched, fire) =>
-        fire && sched.io.out.a.bits.user(CBQRIKey).rcid === i.U
-      })
+    // out.a has the restored (full) address
+    (mods zip node.out).zipWithIndex.foreach { case ((sched, (out, _)), i) =>
+      dramActAcquire.bundle.reads(i).valid := firesAcquireBlockOrGet(i)
+      dramActAcquire.bundle.reads(i).bits.rcid := sched.io.out.a.bits.user(CBQRIKey).rcid
+      dramActAcquire.bundle.reads(i).bits.address := out.a.bits.address
     }
 
     ctrls.foreach { ctrl =>
