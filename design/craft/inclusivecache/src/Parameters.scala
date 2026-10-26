@@ -36,11 +36,6 @@ case class CacheParameters(
   hintsSkipProbe: Boolean,
   nRCID: Int,
   nMCID: Int,
-  cbqriVer: Int,
-  nbwblks: Int,
-  rpfx: Boolean,
-  pfx: Int,
-  mrbwb: Int,
   nDramBanks: Int,
   dramBankOffset: Int)
 {
@@ -311,6 +306,8 @@ object InclusiveCacheParameters
   val lfsrBits = 10
   val L2ControlAddress = BigInt(0x2010000L)
   val L2ControlSize = 0x1000
+  val WayPartAddress = BigInt(0x21000000L)
+  val WayPartSize = 0x800
   def out_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int = micro.outerMSHRs
   def all_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int =
     // We need a dedicated MSHR for B+C each

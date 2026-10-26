@@ -43,26 +43,11 @@ class InclusiveCache(
 
   var resourcesOpt: Option[ResourceBindings] = None
 
-  // create our own register node for regulation, easier than using the control node since it could be per-bank
-  // maybe move this later to reduce number of additions to code
-  val regulationDevice = new SimpleDevice("dram-memory-reg",Seq("rsicv,cbqri-bandwidth-memory", "rsicv,cbqri-bandwidth")) {
-    def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
-
-    override def describe(resources: ResourceBindings): Description = {
-      resourcesOpt = Some(resources)
-
-      val Description(name, mapping) = super.describe(resources)
-      val extra = Map(
-        "riscv,cbqri-rcid" -> ofInt(cache.nRCID),
-        "riscv,cbqri-mcid" -> ofInt(cache.nMCID))
-      Description(name, mapping ++ extra)
-    }
-  }
-
   val dramActAcquire = BundleBridgeSource(() => new ActiveAcquire(cache.nRCID, cache.nMCID, node.edges.out.size, node.edges.out.head.bundle.addressBits))
 
-  val cbqriParams = PerBankBwParams(0x21000000, cache.nRCID, cache.nMCID, cache.cbqriVer, cache.nbwblks, cache.rpfx, cache.pfx, cache.mrbwb)
-  val mmio = LazyModule(new CBQRIBwController(regulationDevice, cbqriParams))
+  // Way partitioning registers, shared by all banks
+  val waypart = LazyModule(new InclusiveCacheWayPart(cache.nRCID, cache.ways,
+    InclusiveCacheParameters.all_mshrs(cache, micro), InclusiveCacheParameters.WayPartAddress))
 
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
@@ -150,8 +135,6 @@ class InclusiveCache(
     }
 
     val nRCID = cache.nRCID
-    val nMCID = cache.nMCID
-    val mrbwb = cache.mrbwb
 
     // Create the L2 Banks
     val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
@@ -187,101 +170,9 @@ class InclusiveCache(
       scheduler
     }
 
-    val mcidCounters = RegInit(VecInit(Seq.fill(nMCID)(0.U(62.W))))
-    val mcidEvts = RegInit(VecInit(Seq.fill(nMCID)(BcMonCtlEvent.NONE)))
-    val s_mcid_hold :: s_mcid_count :: s_mcid_reset :: Nil = Enum(3)
-    val mcidStates = RegInit(VecInit(Seq.fill(nMCID)(s_mcid_hold)))
-
-    val wayPartMasks = RegInit(VecInit(Seq.fill(nRCID)(((1 << cache.ways) - 1).U(cache.ways.W))))
     mods.foreach { sched =>
-      sched.io.wayPartMasks := wayPartMasks
-    }
-
-    wayPartMasks := VecInit(mmio.module.io.wayPartMasks.map { mask =>
-      val localMask = mask(cache.ways - 1, 0)
-      // interp zero mask as all 1s to be safe
-      Mux(localMask.orR, localMask, ~0.U(cache.ways.W))
-    })
-
-    mods.foreach { sched =>
-      sched.io.mshrCapMask := Mux(mmio.module.io.mshrCapMask(micro.outerMSHRs-1,0).orR, mmio.module.io.mshrCapMask, ~0.U((micro.outerMSHRs + 2).W))
-    }
-
-    mmio.module.io.bc_mon_resp.valid := false.B
-    mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.OK
-    mmio.module.io.bc_mon_resp.bits.hasData := false.B
-    mmio.module.io.bc_mon_resp.bits.data := 0.U
-    when ( mmio.module.io.bc_mon_command.valid ) {
-      val opEnum = mmio.module.io.bc_mon_command.bits.op
-      val opValid = ( opEnum === BcCtlOp.CONFIG ) || ( opEnum === BcCtlOp.READ )
-      val evtEnum = mmio.module.io.bc_mon_command.bits.event
-      val evtValid = ( evtEnum === BcMonCtlEvent.NONE ) || ( evtEnum === BcMonCtlEvent.READ_WRITE ) ||
-                  ( evtEnum === BcMonCtlEvent.READ_ONLY ) || ( evtEnum === BcMonCtlEvent.WRITE_ONLY )
-      val mcid = mmio.module.io.bc_mon_command.bits.mcid
-      val mcidValid = mcid < nMCID.U
-
-      mmio.module.io.bc_mon_resp.valid := true.B
-      when ( opValid && mcidValid && evtValid ) {
-        switch ( opEnum ) {
-          is ( BcCtlOp.CONFIG ) {
-            when ( evtEnum =/= BcMonCtlEvent.NONE ) {
-              mcidStates(mcid) := s_mcid_reset
-            } .otherwise {
-              mcidStates(mcid) := s_mcid_hold
-            }
-            mcidEvts(mcid) := evtEnum
-            mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.OK
-          }
-          is ( BcCtlOp.READ ) {
-            mmio.module.io.bc_mon_resp.bits.hasData := true.B
-            mmio.module.io.bc_mon_resp.bits.data := mcidCounters(mcid)
-            mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.OK
-          }
-        }
-      } .elsewhen ( !mcidValid ) {
-        mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.INVALID_MCID
-      } .elsewhen ( !evtValid ) {
-        mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.INVALID_EVT_ID
-      }.otherwise {
-        mmio.module.io.bc_mon_resp.bits.status := BcMonCtlStatus.INVALID_OP
-      }
-    }
-
-    mmio.module.io.bc_alloc_ctl_resp.valid := false.B
-    mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.OK
-    mmio.module.io.bc_alloc_ctl_resp.bits.hasData := false.B
-    mmio.module.io.bc_alloc_ctl_resp.bits.data := 0.U
-    when ( mmio.module.io.bc_alloc_ctl_command.valid ) {
-      val opEnum = mmio.module.io.bc_alloc_ctl_command.bits.op
-      val opValid = ( opEnum === BcCtlOp.CONFIG ) || ( opEnum === BcCtlOp.READ )
-      val rcid = mmio.module.io.bc_alloc_ctl_command.bits.rcid
-      val rcidValid = rcid < nRCID.U
-
-      val rbwb = mmio.module.io.bc_alloc_ctl_command.bits.rbwb
-
-      mmio.module.io.bc_alloc_ctl_resp.valid := true.B
-      when ( opValid && rcidValid ) {
-        switch ( opEnum ) {
-          is ( BcCtlOp.CONFIG ) {
-            val rbwbValid = rbwb > 0.U && rbwb <= mrbwb.U
-            when ( rbwbValid ) {
-              // maxReads(rcid) := rbwb
-              mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.OK
-            } .otherwise {
-              mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.INVALID_BWB
-            }
-          }
-          is ( BcCtlOp.READ ) {
-            mmio.module.io.bc_alloc_ctl_resp.bits.hasData := true.B
-            mmio.module.io.bc_alloc_ctl_resp.bits.data := 0.U
-            mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.OK
-          }
-        }
-      } .elsewhen ( !rcidValid ) {
-        mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.INVALID_RCID
-      }.otherwise {
-        mmio.module.io.bc_alloc_ctl_resp.bits.status := BcAllocCtlStatus.INVALID_OP
-      }
+      sched.io.wayPartMasks := waypart.module.io.wayPartMasks
+      sched.io.mshrCapMask := waypart.module.io.mshrCapMask
     }
 
     val llcReads = WireInit(VecInit(Seq.fill(mods.length)(false.B)))
@@ -324,8 +215,6 @@ class InclusiveCache(
     // Assumption that only one bank fires in a given cycle
     val firesAcquireBlockOrGet = mods.map(sched => sched.io.out.a.fire && sched.io.out.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.Get))
     assert(PopCount(firesAcquireBlockOrGet) <= 1.U)
-    val fireAny = firesAcquireBlockOrGet.reduce(_||_)
-    val firedMcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.user(CBQRIKey).mcid))
 
     // autocounter for outstanding reads
     val outstanding = RegInit(0.U(16.W))
@@ -335,19 +224,6 @@ class InclusiveCache(
     outstanding := outstanding + PopCount(firesAcquireBlockOrGet) - PopCount(recvsGrantData)
     midas.targetutils.PerfCounter.identity(outstanding, "outstanding_llc_reads_to_dram", "Reads fired from LLC to DRAM, awaiting response")
     // end autocounter for outstanding reads
-
-    for ( i <- 0 until nMCID ) {
-      val didMCIDFireAcquire = fireAny && firedMcid === i.U
-
-      when ( mcidStates(i) === s_mcid_count ) {
-        mcidCounters(i) := didMCIDFireAcquire + mcidCounters(i)
-      } .elsewhen ( mcidStates(i) === s_mcid_hold ) {
-        mcidCounters(i) := mcidCounters(i)
-      } .elsewhen ( mcidStates(i) === s_mcid_reset ) {
-        mcidCounters(i) := 0.U
-        mcidStates(i) := s_mcid_count
-      }
-    }
 
     // out.a has the restored (full) address
     (mods zip node.out).zipWithIndex.foreach { case ((sched, (out, _)), i) =>
