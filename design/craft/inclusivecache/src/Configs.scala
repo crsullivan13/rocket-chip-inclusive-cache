@@ -34,11 +34,6 @@ case class InclusiveCacheParams(
   hintsSkipProbe: Boolean = false, // do hints probe the same client
   nRCID: Int,
   nMCID: Int,
-  cbqriVer: Int,
-  nbwblks: Int,
-  rpfx: Boolean,
-  pfx: Int,
-  mrbwb: Int,
   nDramBanks: Int,
   dramBankOffset: Int,
   writeBytes: Int, // backing store update granularity
@@ -70,11 +65,6 @@ class WithInclusiveCache(
   writeBytes: Int = 8,
   nRCID: Int = 2,
   nMCID: Int = 2,
-  cbqriVer: Int = 1,
-  nbwblks: Int = 65535,
-  rpfx: Boolean = false,
-  pfx: Int = 0,
-  mrbwb: Int = 52428,
   nDramBanks: Int = 8,
   dramBankOffset: Int = 9, // assume we have shifted it for set partitioning
   outerMSHRs: Int = 6
@@ -85,11 +75,6 @@ class WithInclusiveCache(
       hintsSkipProbe = hintsSkipProbe,
       nRCID = nRCID,
       nMCID = nMCID,
-      cbqriVer = cbqriVer,
-      nbwblks = nbwblks,
-      rpfx = rpfx,
-      pfx = pfx,
-      mrbwb = mrbwb,
       nDramBanks = nDramBanks,
       dramBankOffset = dramBankOffset,
       memCycles = outerLatencyCycles,
@@ -112,11 +97,6 @@ class WithInclusiveCache(
     val outerMSHRs = icParams.outerMSHRs
     val nRCID = icParams.nRCID
     val nMCID = icParams.nMCID
-    val cbqriVer = icParams.cbqriVer
-    val nbwblks = icParams.nbwblks
-    val rpfx = icParams.rpfx
-    val pfx = icParams.pfx
-    val mrbwb = icParams.mrbwb
     val nDramBanks = icParams.nDramBanks
     val dramBankOffset = icParams.dramBankOffset
     val writeBytes = icParams.writeBytes
@@ -144,11 +124,6 @@ class WithInclusiveCache(
         sets = sets,
         nRCID = nRCID,
         nMCID = nMCID,
-        cbqriVer = cbqriVer,
-        nbwblks = nbwblks,
-        rpfx = rpfx,
-        pfx = pfx,
-        mrbwb = mrbwb,
         nDramBanks = nDramBanks,
         dramBankOffset = dramBankOffset,
         blockBytes = sbus.blockBytes,
@@ -202,8 +177,8 @@ class WithInclusiveCache(
       }
     }
 
-    pbus.coupleTo("mshr-regulation-regnode") {
-        l2.mmio.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
+    pbus.coupleTo("l2-waypart") {
+        l2.waypart.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
     sbus.memTrafficControl match {
