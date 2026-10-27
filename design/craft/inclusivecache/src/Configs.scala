@@ -181,6 +181,10 @@ class WithInclusiveCache(
         l2.waypart.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
+    pbus.coupleTo("l2-monitor") {
+        l2.monitor.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
+    }
+
     sbus.memTrafficControl match {
       case Some(bru: PerBankLLC) => bru.dramActAcquire := l2.dramActAcquire
       case _ => l2.dramActAcquire.makeSink()
