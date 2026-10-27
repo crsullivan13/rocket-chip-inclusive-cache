@@ -35,7 +35,7 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val mcid   = UInt(log2Up(params.cache.nMCID).W)
 }
 
-class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
+class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int) extends Module
 {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
@@ -58,7 +58,7 @@ class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dra
     val a = rcidAs(i)
     val buffer = rcidBuffs(i)
 
-    val buffHeadDramBankTarget = ( buffer.bits.address >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
+    val buffHeadDramBankTarget = params.cache.dramBank(buffer.bits.address)
     val shouldThrottle = io.throttle(i).dramBank(buffHeadDramBankTarget)
 
     io.rcidReadys(i) := a.ready

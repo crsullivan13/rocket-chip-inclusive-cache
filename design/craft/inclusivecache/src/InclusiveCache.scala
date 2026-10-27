@@ -155,8 +155,6 @@ class InclusiveCache(
     val nMCID = cache.nMCID
     val mrbwb = cache.mrbwb
     val nDramBanks = cache.nDramBanks
-    val dramBankBits = log2Ceil(nDramBanks)
-    val dramBankOffset = cache.dramBankOffset
 
     // Create the L2 Banks
     val mods = (node.in zip node.out).zipWithIndex map { case (((in, edgeIn), (out, edgeOut)), i) =>
@@ -170,7 +168,7 @@ class InclusiveCache(
       }
 
       val params = InclusiveCacheParameters(cache, micro, !ctrls.isEmpty, edgeIn, edgeOut)
-      val scheduler = Module(new InclusiveCacheBankScheduler(params, nRCID, nDramBanks, dramBankOffset)).suggestName("inclusive_cache_bank_sched")
+      val scheduler = Module(new InclusiveCacheBankScheduler(params, nRCID, nDramBanks)).suggestName("inclusive_cache_bank_sched")
 
       scheduler.io.in <> in
       out <> scheduler.io.out
@@ -338,7 +336,7 @@ class InclusiveCache(
     val fireAny = firesAcquireBlockOrGet.reduce(_||_)
     val firedMcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.user(CBQRIKey).mcid))
     val firedRcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.user(CBQRIKey).rcid))
-    val firedBank = Mux1H(firesAcquireBlockOrGet, mods.map(sched => sched.io.out.a.bits.address(dramBankOffset + dramBankBits - 1, dramBankOffset)))
+    val firedBank = Mux1H(firesAcquireBlockOrGet, mods.map(sched => cache.dramBank(sched.io.out.a.bits.address)))
 
     // autocounter for outstanding reads
     val outstanding = RegInit(0.U(16.W))

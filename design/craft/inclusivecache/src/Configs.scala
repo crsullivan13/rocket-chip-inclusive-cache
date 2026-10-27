@@ -39,8 +39,8 @@ case class InclusiveCacheParams(
   rpfx: Boolean,
   pfx: Int,
   mrbwb: Int,
-  nDramBanks: Int,
-  dramBankOffset: Int,
+  dramBankBits: Seq[Int],
+  dramBankXorBits: Seq[Int], // XORed pairwise with dramBankBits, empty => linear
   writeBytes: Int, // backing store update granularity
   portFactor: Int, // numSubBanks = (widest TL port * portFactor) / writeBytes
   memCycles: Int,  // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
@@ -75,8 +75,8 @@ class WithInclusiveCache(
   rpfx: Boolean = false,
   pfx: Int = 0,
   mrbwb: Int = 52428,
-  nDramBanks: Int = 8,
-  dramBankOffset: Int = 9, // assume we have shifted it for set partitioning
+  dramBankBits: Seq[Int] = Seq(13, 14, 15, 16), // physical address bits
+  dramBankXorBits: Seq[Int] = Seq(17, 18, 19, 20),
   outerMSHRs: Int = 6
 ) extends Config((site, here, up) => {
   case InclusiveCacheKey => InclusiveCacheParams(
@@ -90,8 +90,8 @@ class WithInclusiveCache(
       rpfx = rpfx,
       pfx = pfx,
       mrbwb = mrbwb,
-      nDramBanks = nDramBanks,
-      dramBankOffset = dramBankOffset,
+      dramBankBits = dramBankBits,
+      dramBankXorBits = dramBankXorBits,
       memCycles = outerLatencyCycles,
       outerMSHRs = outerMSHRs,
       writeBytes = writeBytes,
@@ -117,8 +117,8 @@ class WithInclusiveCache(
     val rpfx = icParams.rpfx
     val pfx = icParams.pfx
     val mrbwb = icParams.mrbwb
-    val nDramBanks = icParams.nDramBanks
-    val dramBankOffset = icParams.dramBankOffset
+    val dramBankBits = icParams.dramBankBits
+    val dramBankXorBits = icParams.dramBankXorBits
     val writeBytes = icParams.writeBytes
     val portFactor = icParams.portFactor
     val memCycles = icParams.memCycles
@@ -149,8 +149,8 @@ class WithInclusiveCache(
         rpfx = rpfx,
         pfx = pfx,
         mrbwb = mrbwb,
-        nDramBanks = nDramBanks,
-        dramBankOffset = dramBankOffset,
+        dramBankBits = dramBankBits,
+        dramBankXorBits = dramBankXorBits,
         blockBytes = sbus.blockBytes,
         beatBytes = sbus.beatBytes,
         hintsSkipProbe = hintsSkipProbe),

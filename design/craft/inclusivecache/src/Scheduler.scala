@@ -26,7 +26,7 @@ import chisel3.experimental.dataview._
 
 import midas.targetutils.SynthesizePrintf
 
-class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int, dramBankOffset: Int) extends Module
+class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int) extends Module
 {
   val io = IO(new Bundle {
     val in = Flipped(TLBundle(params.inner.bundle))
@@ -42,7 +42,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
     val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
   })
 
-  val sourceA = Module(new SourceA(params, nRCID, nDramBanks, dramBankOffset))
+  val sourceA = Module(new SourceA(params, nRCID, nDramBanks))
   val sourceB = Module(new SourceB(params))
   val sourceC = Module(new SourceC(params))
   val sourceD = Module(new SourceD(params))
@@ -144,7 +144,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
       (sourceX.io.req.ready || !m.io.schedule.bits.x.valid) &&
       (directory.io.write.ready || !m.io.schedule.bits.dir.valid)
 
-      val mshrDramBankTarget = ( params.expandAddress(m.io.schedule.bits.a.bits.tag, m.io.schedule.bits.a.bits.set, 0.U) >> dramBankOffset.U ) & ( nDramBanks.U - 1.U )
+      val mshrDramBankTarget = params.cache.dramBank(params.expandAddress(m.io.schedule.bits.a.bits.tag, m.io.schedule.bits.a.bits.set, 0.U))
       val shouldThrottle = io.throttle(m.io.schedule.bits.a.bits.rcid).dramBank(mshrDramBankTarget)
       val noThrottle = !(m.io.schedule.bits.a.valid && shouldThrottle)
 

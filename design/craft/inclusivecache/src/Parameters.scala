@@ -41,8 +41,8 @@ case class CacheParameters(
   rpfx: Boolean,
   pfx: Int,
   mrbwb: Int,
-  nDramBanks: Int,
-  dramBankOffset: Int)
+  dramBankBits: Seq[Int],
+  dramBankXorBits: Seq[Int]) // XORed pairwise with dramBankBits, empty => linear
 {
   require (ways > 0)
   require (sets > 0)
@@ -51,10 +51,18 @@ case class CacheParameters(
   require (blockBytes >= beatBytes)
   require (nRCID > 0 && nRCID <= 16) // TL rcid is 4 bits
   require (nMCID > 0 && nMCID <= 16) // TL mcid is 4 bits
+  require (dramBankBits.nonEmpty)
+  require (dramBankXorBits.isEmpty || dramBankXorBits.size == dramBankBits.size)
 
   val blocks = ways * sets
   val sizeBytes = blocks * blockBytes
   val blockBeats = blockBytes/beatBytes
+  val nDramBanks = 1 << dramBankBits.size
+
+  // addr is a physical address (expandAddress output is fine, bits keep their physical positions)
+  def dramBank(addr: UInt): UInt =
+    if (dramBankXorBits.isEmpty) Cat(dramBankBits.reverse.map(b => addr(b)))
+    else Cat(dramBankBits.zip(dramBankXorBits).reverse.map { case (a, b) => addr(a) ^ addr(b) })
 }
 
 case class InclusiveCachePortParameters(
@@ -187,6 +195,11 @@ case class InclusiveCacheParameters(
     if (x == 0) tail.reverse else bitOffsets(x >> 1, offset + 1, if ((x & 1) == 1) offset :: tail else tail)
   val addressMapping = bitOffsets(pickMask)
   val addressBits = addressMapping.size
+
+  // expandAddress zeroes the bits stripped for L2 banking, so DRAM bank bits must not be among them
+  (cache.dramBankBits ++ cache.dramBankXorBits).foreach { b =>
+    require (addressMapping.contains(b), s"DRAM bank bit ${b} is not a cache address bit (stripped for L2 banking?)")
+  }
 
   // println(s"addresses: ${flatAddresses} => ${pickMask} => ${addressBits}")
 
