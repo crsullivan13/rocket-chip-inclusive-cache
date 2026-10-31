@@ -186,6 +186,10 @@ class WithInclusiveCache(
       case _ => l2.dramActAcquire.makeSink()
     }
 
+    pbus.coupleTo("l2-monitor") {
+        l2.monitor.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
+    }
+
     ElaborationArtefacts.add("l2.json", l2.module.json)
     (filter.node, lastLevelNode, None)
   })
