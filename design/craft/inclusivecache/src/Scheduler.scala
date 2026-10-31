@@ -40,6 +40,8 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
     val wayPartMasks = Input(Vec(nRCID, UInt(params.cache.ways.W)))
     val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
+    // No A MSHR is free
+    val mshrFull = Output(Bool())
   })
 
   val sourceA = Module(new SourceA(params, nRCID, nDramBanks))
@@ -330,6 +332,7 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   val mshr_validOH = Cat(mshrs.map(_.io.status.valid).reverse)
   val mshr_freeOH = ~mshr_validOH & prioFilter
   val mshr_free = mshr_freeOH.orR
+  io.mshrFull := mshr_validOH(params.micro.outerMSHRs-1, 0).andR
 
   // Fanout the request to the appropriate handler (if any)
   val bypassQueue = schedule.reload && bypassMatches

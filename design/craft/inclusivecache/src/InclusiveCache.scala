@@ -66,6 +66,11 @@ class InclusiveCache(
   val cbqriParams = PerBankBwParams(0x21000000, cache.nRCID, cache.nMCID, cache.cbqriVer, cache.nbwblks, cache.rpfx, cache.pfx, cache.mrbwb)
   val mmio = LazyModule(new CBQRIBwController(regulationDevice, cbqriParams))
 
+  // Per-RCID DRAM latency and bank backpressure counters, shared by all banks
+  val monitor = LazyModule(new InclusiveCacheMonitor(cache.nRCID, node.edges.out.size,
+    InclusiveCacheParameters.out_mshrs(cache, micro), node.edges.in.head.client.endSourceId,
+    InclusiveCacheParameters.MonitorAddress))
+
   val device: SimpleDevice = new SimpleDevice("cache-controller", Seq("sifive,inclusivecache0", "cache")) {
     def ofInt(x: Int) = Seq(ResourceInt(BigInt(x)))
 
@@ -346,6 +351,38 @@ class InclusiveCache(
     outstanding := outstanding + PopCount(firesAcquireBlockOrGet) - PopCount(recvsGrantData)
     //midas.targetutils.PerfCounter.identity(outstanding, "outstanding_llc_reads_to_dram", "Reads fired from LLC to DRAM, awaiting response")
     // end autocounter for outstanding reads
+
+    // Monitor taps: inner A ingress and reads, outer reads (no Puts) and writebacks
+    (mods zip (node.edges.in zip node.edges.out)).zipWithIndex.foreach { case ((sched, (edgeIn, edgeOut)), i) =>
+      val tap = monitor.module.io.banks(i)
+      val in = sched.io.in
+      val out = sched.io.out
+      tap.aValid   := in.a.valid
+      tap.aReady   := in.a.ready
+      tap.aRcid    := in.a.bits.user.lift(CBQRIKey).map(_.rcid).getOrElse(0.U)
+      tap.mshrFull := sched.io.mshrFull
+
+      tap.svcIssue.valid       := in.a.fire &&
+        in.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.AcquirePerm, TLMessages.Get)
+      tap.svcIssue.bits.source := in.a.bits.source
+      tap.svcIssue.bits.rcid   := tap.aRcid
+      tap.svcDone.valid := in.d.fire && edgeIn.first(in.d) &&
+        in.d.bits.opcode.isOneOf(TLMessages.GrantData, TLMessages.Grant, TLMessages.AccessAckData)
+      tap.svcDone.bits  := in.d.bits.source
+
+      tap.rdIssue.valid       := firesAcquireBlockOrGet(i)
+      tap.rdIssue.bits.source := out.a.bits.source
+      tap.rdIssue.bits.rcid   := out.a.bits.user(CBQRIKey).rcid
+      tap.rdDone.valid := out.d.fire && edgeOut.first(out.d) &&
+        out.d.bits.opcode.isOneOf(TLMessages.GrantData, TLMessages.AccessAckData)
+      tap.rdDone.bits  := out.d.bits.source
+
+      tap.wrIssue.valid       := out.c.fire && edgeOut.first(out.c) && out.c.bits.opcode === TLMessages.ReleaseData
+      tap.wrIssue.bits.source := out.c.bits.source
+      tap.wrIssue.bits.rcid   := out.c.bits.user(CBQRIKey).rcid
+      tap.wrDone.valid := out.d.fire && out.d.bits.opcode === TLMessages.ReleaseAck
+      tap.wrDone.bits  := out.d.bits.source
+    }
 
     for ( i <- 0 until nMCID ) {
       val didMCIDFireAcquire = fireAny && firedMcid === i.U

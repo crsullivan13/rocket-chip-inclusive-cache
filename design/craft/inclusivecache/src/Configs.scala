@@ -206,6 +206,10 @@ class WithInclusiveCache(
         l2.mmio.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
     }
 
+    pbus.coupleTo("l2-monitor") {
+        l2.monitor.regnode := TLFragmenter(pbus.beatBytes, pbus.blockBytes) := _
+    }
+
     ElaborationArtefacts.add("l2.json", l2.module.json)
     (filter.node, lastLevelNode, None)
   })

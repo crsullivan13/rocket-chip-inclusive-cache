@@ -324,6 +324,8 @@ object InclusiveCacheParameters
   val lfsrBits = 10
   val L2ControlAddress = BigInt(0x2010000L)
   val L2ControlSize = 0x1000
+  val MonitorAddress = BigInt(0x21001000L)
+  val MonitorSize = 0x1000
   def out_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int = micro.outerMSHRs
   def all_mshrs(cache: CacheParameters, micro: InclusiveCacheMicroParameters): Int =
     // We need a dedicated MSHR for B+C each
