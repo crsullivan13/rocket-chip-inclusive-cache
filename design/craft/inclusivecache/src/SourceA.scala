@@ -35,13 +35,12 @@ class SourceARequest(params: InclusiveCacheParameters) extends InclusiveCacheBun
   val mcid   = UInt(log2Up(params.cache.nMCID).W)
 }
 
-class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int) extends Module
+class SourceA(params: InclusiveCacheParameters, nRCID: Int) extends Module
 {
   val io = IO(new Bundle {
     val req = Flipped(Decoupled(new SourceARequest(params)))
     val rcidReadys = Output(Vec(nRCID, Bool()))
     val a = Decoupled(new TLBundleA(params.outer.bundle))
-    val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
   })
 
   // ready must be a register, because we derive valid from ready
@@ -58,15 +57,10 @@ class SourceA(params: InclusiveCacheParameters, nRCID: Int, nDramBanks: Int) ext
     val a = rcidAs(i)
     val buffer = rcidBuffs(i)
 
-    val buffHeadDramBankTarget = params.cache.dramBank(buffer.bits.address)
-    val shouldThrottle = io.throttle(i).dramBank(buffHeadDramBankTarget)
-
     io.rcidReadys(i) := a.ready
     rcidReadys(i) := a.ready
 
     arb.io.in(i) <> buffer
-    buffer.ready := arb.io.in(i).ready && !(shouldThrottle)
-    arb.io.in(i).valid := buffer.valid && !(shouldThrottle)
 
     a.valid := io.req.valid && io.req.bits.rcid === i.U
     params.ccover(a.valid && !a.ready, "SOURCEA_STALL", "Backpressured when issuing an Acquire")

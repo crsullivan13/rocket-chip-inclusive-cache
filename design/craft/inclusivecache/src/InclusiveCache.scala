@@ -34,6 +34,11 @@ class ThrottleBundle(nDramBanks: Int) extends Bundle {
   val dramBank = Vec(nDramBanks, Bool())
 }
 
+class AdmitBundle(nRCID: Int, nDramBanks: Int) extends Bundle {
+  val rcid = UInt(log2Up(nRCID).W)
+  val bank = UInt(log2Up(nDramBanks).W)
+}
+
 class InclusiveCache(
   val cache: CacheParameters,
   val micro: InclusiveCacheMicroParameters,
@@ -335,13 +340,7 @@ class InclusiveCache(
     periodReset := periodCount >= mmio.module.io.periodLen
     periodCount := Mux(periodReset || !mmio.module.io.enGlobal, 0.U, periodCount + 1.U)
 
-    // Assumption that only one bank fires in a given cycle
     val firesAcquireBlockOrGet = mods.map(sched => sched.io.out.a.fire && sched.io.out.a.bits.opcode.isOneOf(TLMessages.AcquireBlock, TLMessages.Get))
-    assert(PopCount(firesAcquireBlockOrGet) <= 1.U)
-    val fireAny = firesAcquireBlockOrGet.reduce(_||_)
-    val firedMcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.user(CBQRIKey).mcid))
-    val firedRcid = Mux1H(firesAcquireBlockOrGet, mods.map(_.io.out.a.bits.user(CBQRIKey).rcid))
-    val firedBank = Mux1H(firesAcquireBlockOrGet, mods.map(sched => cache.dramBank(sched.io.out.a.bits.address)))
 
     // autocounter for outstanding reads
     val outstanding = RegInit(0.U(16.W))
@@ -385,10 +384,11 @@ class InclusiveCache(
     }
 
     for ( i <- 0 until nMCID ) {
-      val didMCIDFireAcquire = fireAny && firedMcid === i.U
+      val mcidFires = PopCount(mods.zip(firesAcquireBlockOrGet).map { case (sched, fire) =>
+        fire && sched.io.out.a.bits.user(CBQRIKey).mcid === i.U })
 
       when ( mcidStates(i) === s_mcid_count ) {
-        mcidCounters(i) := didMCIDFireAcquire + mcidCounters(i)
+        mcidCounters(i) := mcidFires + mcidCounters(i)
       } .elsewhen ( mcidStates(i) === s_mcid_hold ) {
         mcidCounters(i) := mcidCounters(i)
       } .elsewhen ( mcidStates(i) === s_mcid_reset ) {
@@ -398,13 +398,13 @@ class InclusiveCache(
     }
 
     for ( i <- 0 until nRCID ) {
-      val didRCIDFireAcquire = fireAny && firedRcid === i.U
-
       for ( j <- 0 until nDramBanks ) {
-        val didTargetBank = didRCIDFireAcquire && firedBank === j.U
+        val charge = PopCount(mods.map(sched => sched.io.admit.valid && sched.io.admit.bits.rcid === i.U && sched.io.admit.bits.bank === j.U))
         val cntrMSB = bankReadCntrs(i)(j)(cntrBits - 1)
-        bankReadCntrs(i)(j) := Mux(periodReset || !mmio.module.io.enGlobal, (maxReads(i) -& 1.U) - didTargetBank, 
-          Mux(!cntrMSB, bankReadCntrs(i)(j) - didTargetBank, bankReadCntrs(i)(j)))
+        val fullBudget = maxReads(i) -& 1.U
+        // Same-cycle admits from different L2 banks can overshoot, repaid at the next reload
+        val reload = Mux(cntrMSB, bankReadCntrs(i)(j) + maxReads(i), fullBudget)
+        bankReadCntrs(i)(j) := Mux(!mmio.module.io.enGlobal, fullBudget, Mux(periodReset, reload, bankReadCntrs(i)(j))) - charge
 
         val throttleBit = cntrMSB && mmio.module.io.enGlobal
         mods.foreach( sched => sched.io.throttle(i).dramBank(j) := throttleBit )

@@ -40,11 +40,12 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
 
     val wayPartMasks = Input(Vec(nRCID, UInt(params.cache.ways.W)))
     val throttle = Input(Vec(nRCID, new ThrottleBundle(nDramBanks)))
+    val admit = Valid(new AdmitBundle(nRCID, nDramBanks))
     // No A MSHR is free
     val mshrFull = Output(Bool())
   })
 
-  val sourceA = Module(new SourceA(params, nRCID, nDramBanks))
+  val sourceA = Module(new SourceA(params, nRCID))
   val sourceB = Module(new SourceB(params))
   val sourceC = Module(new SourceC(params))
   val sourceD = Module(new SourceD(params))
@@ -52,7 +53,6 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   val sourceX = Module(new SourceX(params))
 
   io.out.a <> sourceA.io.a
-  sourceA.io.throttle := io.throttle
   io.out.c <> sourceC.io.c
   //sourceC.io.throttle := io.throttle
   io.out.e <> sourceE.io.e
@@ -172,6 +172,9 @@ class InclusiveCacheBankScheduler(params: InclusiveCacheParameters, nRCID: Int, 
   schedule.d.bits.sink   := mshr_select
 
   sourceA.io.req.valid := schedule.a.valid
+  io.admit.valid := sourceA.io.req.fire && schedule.a.bits.block
+  io.admit.bits.rcid := schedule.a.bits.rcid
+  io.admit.bits.bank := params.cache.dramBank(params.expandAddress(schedule.a.bits.tag, schedule.a.bits.set, 0.U))
   sourceB.io.req.valid := schedule.b.valid
   sourceC.io.req.valid := schedule.c.valid
   sourceD.io.req.valid := schedule.d.valid
